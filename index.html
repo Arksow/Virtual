@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Wing Flappy</title>
+    <link rel="stylesheet" href="styles.css" />
+    <script src="/node_modules/@mediapipe/drawing_utils/drawing_utils.js"></script>
+    <script src="/node_modules/@mediapipe/pose/pose.js"></script>
+  </head>
+  <body>
+    <main class="shell">
+      <section class="game-area" aria-label="Arm controlled Flappy Bird game">
+        <canvas id="gameCanvas" aria-label="Game canvas"></canvas>
+
+        <aside class="tracker" aria-label="Arm tracking preview">
+          <div class="preview">
+            <video id="webcam" playsinline muted></video>
+            <canvas id="handCanvas"></canvas>
+            <div class="tracking-dot" id="trackingDot" hidden></div>
+          </div>
+          <div class="tracker-copy">
+            <span id="cameraStatus">Camera idle</span>
+            <span id="handStatus">No pose yet</span>
+          </div>
+        </aside>
+
+        <div class="hud" aria-live="polite">
+          <div>
+            <span class="label">Score</span>
+            <strong id="score">0</strong>
+          </div>
+          <div>
+            <span class="label">Best</span>
+            <strong id="best">0</strong>
+          </div>
+          <div>
+            <span class="label">Control</span>
+            <strong id="controlState">Keyboard</strong>
+          </div>
+        </div>
+
+        <div class="start-panel" id="startPanel">
+          <p class="kicker">Wing Flappy</p>
+          <h1 id="menuTitle">Ready to fly?</h1>
+          <p class="intro" id="menuIntro">
+            Press play to set up camera arm tracking. You can choose Camera or Keyboard next.
+          </p>
+          <div class="actions">
+            <button id="cameraButton" type="button">Play</button>
+            <button id="playButton" type="button" class="secondary" hidden>Keyboard</button>
+          </div>
+          <p class="hint" id="menuHint">Your video stays in the browser.</p>
+        </div>
+
+        <div class="message" id="gameMessage" hidden>
+          <strong id="messageTitle">Game over</strong>
+          <span id="messageText">Press space or tap to restart.</span>
+          <div class="message-actions">
+            <button id="mainMenuButton" type="button" class="secondary">Main menu</button>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <script src="app.js"></script>
+  </body>
+</html>

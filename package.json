@@ -1,0 +1,14 @@
+{
+  "name": "hand-flappy",
+  "version": "1.0.0",
+  "private": true,
+  "description": "A webcam arm-tracking Flappy Bird game powered by MediaPipe Pose.",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "dependencies": {
+    "@mediapipe/drawing_utils": "^0.3.1675466124",
+    "@mediapipe/pose": "^0.5.1675469404"
+  }
+}
