@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="Pose Match Game - a webcam-powered party game where players race to match AI-scored poses." />
+    <title>Pose Match Game</title>
+    <link rel="stylesheet" href="/src/styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <section class="hero-card" aria-labelledby="game-title">
+        <div class="hero-copy">
+          <p class="eyebrow">AI webcam party game</p>
+          <h1 id="game-title">Pose Match Game</h1>
+          <p class="lede">
+            Race the countdown, match the glowing silhouette, and let MediaPipe score your skeleton in real time.
+          </p>
+          <div class="mode-picker" role="group" aria-label="Game mode">
+            <button class="mode-card is-active" data-mode="solo">
+              <span>Solo Challenge</span>
+              <small>Beat your own high score</small>
+            </button>
+            <button class="mode-card" data-mode="hotseat">
+              <span>Hot Seat</span>
+              <small>Pass the webcam</small>
+            </button>
+            <button class="mode-card" data-mode="party">
+              <span>Party Showdown</span>
+              <small>Share a room code</small>
+            </button>
+          </div>
+        </div>
+        <aside class="score-card" aria-label="Current game summary">
+          <span class="round-label">Round <strong id="roundNumber">1</strong>/10</span>
+          <div class="total-score" id="totalScore">0</div>
+          <span class="score-caption">total points</span>
+          <div class="room-code" id="roomCode" hidden>ROOM <strong>POSE</strong></div>
+        </aside>
+      </section>
+
+      <section class="game-grid">
+        <article class="stage-card">
+          <div class="stage-topline">
+            <div>
+              <p class="eyebrow">Target pose</p>
+              <h2 id="poseName">Star Power</h2>
+            </div>
+            <span class="tier-pill" id="tierPill">🟢 Easy</span>
+          </div>
+          <div class="target-stage">
+            <canvas id="targetCanvas" width="420" height="460" aria-label="Target pose silhouette"></canvas>
+            <div class="countdown" id="countdown">3</div>
+          </div>
+          <p class="pose-tip" id="poseTip">Open stance, arms wide, shoulders level.</p>
+        </article>
+
+        <article class="camera-card">
+          <div class="stage-topline">
+            <div>
+              <p class="eyebrow">Live skeleton</p>
+              <h2 id="cameraStatus">Camera standby</h2>
+            </div>
+            <span class="live-badge" id="aiStatus">MediaPipe ready</span>
+          </div>
+          <div class="camera-stage">
+            <video id="webcam" autoplay muted playsinline></video>
+            <canvas id="overlayCanvas" width="640" height="480" aria-label="Live pose overlay"></canvas>
+            <div class="camera-help" id="cameraHelp">
+              <strong>No controllers needed.</strong>
+              <span>Allow webcam access to enable real AI scoring. Demo scoring is available without a camera.</span>
+            </div>
+          </div>
+          <div class="accuracy-meter" aria-label="Pose match accuracy">
+            <span id="accuracyText">0%</span>
+            <div class="meter-track"><div class="meter-fill" id="meterFill"></div></div>
+            <strong id="ratingText">Warm up!</strong>
+          </div>
+        </article>
+      </section>
+
+      <section class="control-panel">
+        <div class="players-panel">
+          <label for="playerName">Player</label>
+          <input id="playerName" value="Player 1" maxlength="18" />
+          <button id="addPlayerBtn" type="button">Add hot-seat player</button>
+        </div>
+        <div class="actions-panel">
+          <button id="cameraBtn" class="secondary" type="button">Enable webcam AI</button>
+          <button id="startBtn" class="primary" type="button">Start 10-round match</button>
+          <button id="demoBtn" class="secondary" type="button">Demo score</button>
+        </div>
+      </section>
+
+      <section class="leaderboard-card" aria-labelledby="leaderboardTitle">
+        <div class="stage-topline">
+          <div>
+            <p class="eyebrow">Leaderboard</p>
+            <h2 id="leaderboardTitle">Party scores</h2>
+          </div>
+          <button id="resetBtn" type="button" class="ghost">Reset</button>
+        </div>
+        <ol id="leaderboard" class="leaderboard"></ol>
+      </section>
+    </main>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
