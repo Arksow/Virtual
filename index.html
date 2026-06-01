@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Hand Arcade</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="arcade-shell" aria-label="Hand Arcade game">
+      <section class="game-stage">
+        <header class="topbar">
+          <div>
+            <p class="kicker">Hand Arcade</p>
+            <h1>Target Tap</h1>
+          </div>
+
+          <div class="hud" aria-live="polite">
+            <div>
+              <span>Score</span>
+              <strong id="score">0</strong>
+            </div>
+            <div>
+              <span>Timer</span>
+              <strong id="timer">30</strong>
+            </div>
+            <div>
+              <span>Best</span>
+              <strong id="best">0</strong>
+            </div>
+          </div>
+        </header>
+
+        <div class="play-wrap">
+          <canvas id="gameCanvas" aria-label="Hand Arcade play area"></canvas>
+          <div class="game-controls" aria-label="Game controls">
+            <button id="pauseButton" type="button" hidden>Pause</button>
+            <button id="restartButton" type="button" hidden>Restart</button>
+          </div>
+          <div class="debug-panel" id="debugPanel" aria-live="polite"></div>
+          <aside class="camera-panel" data-state="idle" aria-label="Webcam preview">
+            <div class="camera-view">
+              <video id="webcam" autoplay muted playsinline></video>
+              <canvas id="handCanvas" aria-label="Hand landmark overlay"></canvas>
+            </div>
+            <div class="camera-controls">
+              <div class="camera-copy">
+                <span id="cameraStatus">Camera idle</span>
+                <span id="cameraHelp">Start the camera when ready.</span>
+              </div>
+              <button id="cameraButton" type="button">Start Camera</button>
+            </div>
+          </aside>
+
+          <div class="start-panel" id="startPanel">
+            <p class="kicker" id="panelKicker">Ready</p>
+            <h2 id="panelTitle">Beat the clock</h2>
+            <p id="panelText">Collect glowing orbs, avoid red hazards, and beat the clock.</p>
+            <div class="panel-actions">
+              <button id="startButton" type="button">Start Game</button>
+              <button id="panelRestartButton" type="button" class="secondary" hidden>Restart</button>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <script type="module" src="app.js"></script>
+  </body>
+</html>
