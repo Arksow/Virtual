@@ -1,0 +1,11 @@
+[     347ms] [WARNING] Webcam access failed: NotAllowedError: Permission denied @ http://127.0.0.1:5173/src/main.js?t=1780386619798:1306
+[  423035ms] TypeError: Cannot set properties of null (setting 'textContent')
+    at updateGameUi (http://127.0.0.1:5173/src/main.js?t=1780386619798:781:31)
+    at http://127.0.0.1:5173/src/main.js?t=1780386619798:901:1
+[  440987ms] ReferenceError: gameStartButton is not defined
+    at updateGameUi (http://127.0.0.1:5173/src/main.js?t=1780387080825:782:3)
+    at http://127.0.0.1:5173/src/main.js?t=1780387080825:902:1
+[  449494ms] ReferenceError: gameStartButton is not defined
+    at http://127.0.0.1:5173/src/main.js?t=1780387089346:1353:1
+[  449502ms] [WARNING] Webcam access failed: NotAllowedError: Permission denied @ http://127.0.0.1:5173/src/main.js?t=1780387089346:1308
+[  459938ms] [WARNING] Webcam access failed: NotAllowedError: Permission denied @ http://127.0.0.1:5173/src/main.js?t=1780387099574:1308

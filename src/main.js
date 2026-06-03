@@ -1,0 +1,2040 @@
+import "./styles.css";
+import * as THREE from "three";
+import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
+import { FilesetResolver, HandLandmarker } from "@mediapipe/tasks-vision";
+
+const canvas = document.querySelector("#scene");
+const webcamVideo = document.querySelector("#webcam-video");
+const handOverlay = document.querySelector("#hand-overlay");
+const handOverlayContext = handOverlay.getContext("2d");
+const webcamStartButton = document.querySelector("#webcam-start");
+const webcamStopButton = document.querySelector("#webcam-stop");
+const webcamStatus = document.querySelector("#webcam-status");
+const webcamPanel = document.querySelector(".webcam-panel");
+const webcamMessage = document.querySelector("#webcam-message");
+const handStatus = document.querySelector("#hand-status");
+const lapsLeftLabel = document.querySelector("#laps-left");
+const raceTimerLabel = document.querySelector("#race-timer");
+const gameMenu = document.querySelector("#game-menu");
+const raceModeButtons = document.querySelectorAll("[data-menu-mode]");
+const countdownLabel = document.querySelector("#countdown-label");
+const checkpointFeedback = document.querySelector("#checkpoint-feedback");
+const carHoverLabel = document.querySelector("#car-hover-label");
+const multiplayerConfigForm = document.querySelector("#multiplayer-config");
+const multiplayerBackButton = document.querySelector("#multiplayer-back");
+const playerNameInput = document.querySelector("#player-name");
+const roomCodeInput = document.querySelector("#room-code");
+const multiplayerMessage = document.querySelector("#multiplayer-message");
+const createRoomButton = document.querySelector("#create-room");
+const showJoinRoomButton = document.querySelector("#show-join-room");
+const joinRoomButton = document.querySelector("#join-room");
+const activeRoomCodeLabel = document.querySelector("#active-room-code");
+const roomPlayerList = document.querySelector("#room-player-list");
+const readyToggleButton = document.querySelector("#ready-toggle");
+const startMultiplayerButton = document.querySelector("#start-multiplayer");
+const leaderWaitingMessage = document.querySelector("#leader-waiting");
+
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x93b4cf);
+scene.fog = new THREE.Fog(0x93b4cf, 260, 700);
+
+const camera = new THREE.PerspectiveCamera(48, window.innerWidth / window.innerHeight, 0.1, 600);
+camera.position.set(0, 265, 0.1);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.maxPolarAngle = Math.PI * 0.46;
+controls.minDistance = 35;
+controls.maxDistance = 320;
+controls.target.set(0, 0, 0);
+
+const clock = new THREE.Clock();
+const world = new THREE.Group();
+scene.add(world);
+const raycaster = new THREE.Raycaster();
+const pointer = new THREE.Vector2();
+let hoveredCar = null;
+
+function getRaceClockTime() {
+  return performance.now() / 1000;
+}
+
+const materials = {
+  grass: new THREE.MeshStandardMaterial({ color: 0x466f34, roughness: 0.95 }),
+  grassDark: new THREE.MeshStandardMaterial({ color: 0x315629, roughness: 0.98 }),
+  asphalt: new THREE.MeshStandardMaterial({ color: 0x202326, roughness: 0.88 }),
+  shoulderRed: new THREE.MeshStandardMaterial({ color: 0xb9302d, roughness: 0.7 }),
+  shoulderWhite: new THREE.MeshStandardMaterial({ color: 0xf5f1e8, roughness: 0.7 }),
+  line: new THREE.MeshBasicMaterial({ color: 0xf6f2d8 }),
+  guard: new THREE.MeshStandardMaterial({ color: 0xdfe7ea, roughness: 0.38, metalness: 0.25, side: THREE.DoubleSide }),
+  wall: new THREE.MeshStandardMaterial({ color: 0x2e3235, roughness: 0.64 }),
+  concrete: new THREE.MeshStandardMaterial({ color: 0x68706b, roughness: 0.92 }),
+  sidewalk: new THREE.MeshStandardMaterial({ color: 0xa8ada6, roughness: 0.88 }),
+  arenaFloor: new THREE.MeshStandardMaterial({ color: 0x5e665f, roughness: 0.9 }),
+  arenaWall: new THREE.MeshStandardMaterial({ color: 0x33383b, roughness: 0.72 }),
+  seating: new THREE.MeshStandardMaterial({ color: 0x6e7782, roughness: 0.8 }),
+  crowd: new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.72 }),
+  crowdFace: new THREE.MeshBasicMaterial({ color: 0x111419 }),
+  windows: new THREE.MeshStandardMaterial({ color: 0x8cc8e8, roughness: 0.16, metalness: 0.05 }),
+  streetPaint: new THREE.MeshBasicMaterial({ color: 0xf7f2d7 }),
+  racingLine: new THREE.MeshBasicMaterial({ color: 0xd7f86e, transparent: true, opacity: 0.42, depthWrite: false }),
+  blue: new THREE.MeshStandardMaterial({ color: 0x2f70ff, roughness: 0.45, metalness: 0.15 }),
+  red: new THREE.MeshStandardMaterial({ color: 0xe23d35, roughness: 0.45, metalness: 0.15 }),
+  yellow: new THREE.MeshStandardMaterial({ color: 0xffc638, roughness: 0.45, metalness: 0.15 }),
+  glass: new THREE.MeshStandardMaterial({
+    color: 0xbde7ff,
+    roughness: 0.08,
+    metalness: 0.02,
+    transparent: true,
+    opacity: 0.55,
+  }),
+};
+
+let webcamStream = null;
+let webcamTexture = null;
+let webcamScreen = null;
+let handLandmarker = null;
+let visionFileset = null;
+let handTrackingFrame = null;
+let lastHandVideoTime = -1;
+let isWebcamStarting = false;
+let checkpointFeedbackTimer = null;
+let lastMultiplayerPositionSync = 0;
+const playerControl = {
+  progress: 0.02,
+  position: new THREE.Vector3(),
+  heading: 0,
+  speed: 0,
+  targetSpeed: 0,
+  steer: 0,
+  targetSteer: 0,
+  handActive: false,
+};
+const raceState = {
+  totalLaps: 3,
+  lapsCompleted: 0,
+  nextCheckpoint: 1,
+  phase: "menu",
+  started: false,
+  finished: false,
+  startTime: 0,
+  elapsed: 0,
+  checkpointCooldown: 0,
+  countdownDuration: 5,
+  countdownStartTime: 0,
+  countdownRemaining: 5,
+  mode: "singleplayer",
+  playerId: "",
+  playerName: "Player 1",
+  roomCode: "ARENA",
+  isLeader: false,
+  players: [],
+};
+
+const standbyScreenMaterial = new THREE.MeshBasicMaterial({ color: 0x0b1417 });
+const trackSamples = [];
+const drivableHalfWidth = 12.6;
+const checkpointRadius = 11;
+const startLineProgress = 0.02;
+const gridStartProgress = 0.985;
+const checkpointDefinitions = [
+  { t: startLineProgress, color: 0x55ff8b },
+  { t: 0.34, color: 0x3bb7ff },
+  { t: 0.67, color: 0xffd447 },
+];
+const startCheckpointIndex = 0;
+const checkpointMeshes = [];
+const handControlGuide = {
+  maxSpeed: 58,
+  fistThreshold: 0.62,
+  steerDeadZone: 0.045,
+  maxSteerDelta: 0.28,
+  targetSpeedSmoothing: 0.14,
+  speedSmoothing: 0.075,
+};
+const startingGrid = {
+  playerLane: -4.2,
+  rivalLane: 0,
+  paceLane: 4.2,
+};
+const maxMultiplayerPlayers = 5;
+const multiplayerCarLanes = [-4.2, 4.2, 0, -8.4, 8.4, -2.1, 2.1, -6.3, 6.3];
+const multiplayerCarColors = [
+  [0xe23d35, 0x111111],
+  [0x2f70ff, 0xf5f1e8],
+  [0xffc638, 0x222222],
+  [0x22c78a, 0x0f2018],
+  [0xf064c8, 0x190d16],
+  [0x6de7ff, 0x10202a],
+];
+const carModelRotationOffset = Math.PI;
+const multiplayerStorageKey = "ridgeway-arena-multiplayer-rooms";
+const multiplayerRoomChannel =
+  "BroadcastChannel" in window ? new BroadcastChannel("ridgeway-arena-multiplayer-rooms") : null;
+const handConnections = [
+  [0, 1],
+  [1, 2],
+  [2, 3],
+  [3, 4],
+  [0, 5],
+  [5, 6],
+  [6, 7],
+  [7, 8],
+  [5, 9],
+  [9, 10],
+  [10, 11],
+  [11, 12],
+  [9, 13],
+  [13, 14],
+  [14, 15],
+  [15, 16],
+  [13, 17],
+  [17, 18],
+  [18, 19],
+  [19, 20],
+  [0, 17],
+];
+const trackPoints = [
+  [-74, 0, -18],
+  [-63, 0, -52],
+  [-28, 0, -65],
+  [14, 0, -59],
+  [49, 0, -41],
+  [67, 0, -8],
+  [55, 0, 26],
+  [22, 0, 37],
+  [2, 0, 62],
+  [-34, 0, 56],
+  [-63, 0, 31],
+  [-82, 0, 8],
+];
+
+const trackCurve = new THREE.CatmullRomCurve3(
+  trackPoints.map(([x, y, z]) => new THREE.Vector3(x, y, z)),
+  true,
+  "catmullrom",
+  0.5,
+);
+
+for (let i = 0; i < 360; i += 1) {
+  const t = i / 360;
+  trackSamples.push({
+    point: trackCurve.getPointAt(t),
+    tangent: trackCurve.getTangentAt(t).normalize(),
+    t,
+  });
+}
+
+function sampleCurve(curve, samples) {
+  return Array.from({ length: samples }, (_, i) => curve.getPointAt(i / samples));
+}
+
+function findNearestTrackSample(position) {
+  let nearest = trackSamples[0];
+  let nearestDistance = Infinity;
+
+  trackSamples.forEach((sample) => {
+    const distance = (position.x - sample.point.x) ** 2 + (position.z - sample.point.z) ** 2;
+    if (distance < nearestDistance) {
+      nearest = sample;
+      nearestDistance = distance;
+    }
+  });
+
+  return nearest;
+}
+
+function keepPlayerOnTrack() {
+  const nearest = findNearestTrackSample(playerControl.position);
+  const normal = new THREE.Vector3(-nearest.tangent.z, 0, nearest.tangent.x).normalize();
+  const offset = new THREE.Vector3().subVectors(playerControl.position, nearest.point).dot(normal);
+  const clampedOffset = THREE.MathUtils.clamp(offset, -drivableHalfWidth, drivableHalfWidth);
+
+  if (Math.abs(clampedOffset - offset) > 0.001) {
+    playerControl.position.copy(nearest.point).addScaledVector(normal, clampedOffset);
+    playerControl.speed *= 0.42;
+  }
+
+  playerControl.progress = nearest.t;
+}
+
+function makeRibbon(curve, width, material, y = 0.05, samples = 420, offset = 0) {
+  const vertices = [];
+  const uvs = [];
+  const indices = [];
+
+  for (let i = 0; i <= samples; i += 1) {
+    const t = (i / samples) % 1;
+    const center = curve.getPointAt(t);
+    const tangent = curve.getTangentAt(t).normalize();
+    const normal = new THREE.Vector3(-tangent.z, 0, tangent.x).normalize();
+    center.addScaledVector(normal, offset);
+
+    const left = center.clone().addScaledVector(normal, width * 0.5);
+    const right = center.clone().addScaledVector(normal, -width * 0.5);
+    vertices.push(left.x, y, left.z, right.x, y, right.z);
+    uvs.push(0, i / 12, 1, i / 12);
+
+    if (i < samples) {
+      const base = i * 2;
+      indices.push(base, base + 1, base + 2, base + 1, base + 3, base + 2);
+    }
+  }
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.Float32BufferAttribute(vertices, 3));
+  geometry.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
+  geometry.setIndex(indices);
+  geometry.computeVertexNormals();
+
+  const mesh = new THREE.Mesh(geometry, material);
+  mesh.receiveShadow = true;
+  return mesh;
+}
+
+function makeDashedLine(curve, offset, dashLength, gapLength, width) {
+  const group = new THREE.Group();
+  const totalLength = curve.getLength();
+  const segmentLength = dashLength + gapLength;
+  const segments = Math.floor(totalLength / segmentLength);
+
+  for (let i = 0; i < segments; i += 1) {
+    const start = (i * segmentLength) / totalLength;
+    const mid = (i * segmentLength + dashLength * 0.5) / totalLength;
+    const point = curve.getPointAt(mid % 1);
+    const tangent = curve.getTangentAt(mid % 1).normalize();
+    const normal = new THREE.Vector3(-tangent.z, 0, tangent.x).normalize();
+    point.addScaledVector(normal, offset);
+
+    const dash = new THREE.Mesh(new THREE.BoxGeometry(width, 0.045, dashLength), materials.line);
+    dash.position.set(point.x, 0.16, point.z);
+    dash.rotation.y = Math.atan2(tangent.x, tangent.z);
+    dash.receiveShadow = true;
+    group.add(dash);
+  }
+
+  return group;
+}
+
+function makeRacingLine(curve) {
+  const group = new THREE.Group();
+
+  const chevronMaterial = new THREE.MeshBasicMaterial({ color: 0xf4ffd0, transparent: true, opacity: 0.88 });
+  for (let i = 0; i < 11; i += 1) {
+    const t = i / 11;
+    const point = curve.getPointAt(t);
+    const tangent = curve.getTangentAt(t).normalize();
+    const arrow = new THREE.Group();
+
+    const stem = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.052, 3.2), chevronMaterial);
+    stem.position.z = -0.9;
+    arrow.add(stem);
+
+    [-1, 1].forEach((side) => {
+      const strip = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.052, 3.5), chevronMaterial);
+      strip.position.set(side * 0.74, 0, 0.82);
+      strip.rotation.y = side * 0.72;
+      strip.receiveShadow = true;
+      arrow.add(strip);
+    });
+
+    arrow.position.set(point.x, 0.24, point.z);
+    arrow.rotation.y = Math.atan2(tangent.x, tangent.z);
+    group.add(arrow);
+  }
+
+  return group;
+}
+
+function makeTrackWall(curve, offset, height = 1.2, samples = 360) {
+  const vertices = [];
+  const indices = [];
+
+  for (let i = 0; i <= samples; i += 1) {
+    const t = (i / samples) % 1;
+    const point = curve.getPointAt(t);
+    const tangent = curve.getTangentAt(t).normalize();
+    const normal = new THREE.Vector3(-tangent.z, 0, tangent.x).normalize();
+    point.addScaledVector(normal, offset);
+    vertices.push(point.x, 0.16, point.z, point.x, height, point.z);
+
+    if (i < samples) {
+      const base = i * 2;
+      indices.push(base, base + 1, base + 2, base + 1, base + 3, base + 2);
+    }
+  }
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.Float32BufferAttribute(vertices, 3));
+  geometry.setIndex(indices);
+  geometry.computeVertexNormals();
+
+  const wall = new THREE.Mesh(geometry, materials.guard);
+  wall.castShadow = true;
+  wall.receiveShadow = true;
+  return wall;
+}
+
+function addGround() {
+  const ground = new THREE.Mesh(new THREE.PlaneGeometry(420, 320, 32, 24), materials.arenaFloor);
+  ground.rotation.x = -Math.PI / 2;
+  ground.position.y = -0.05;
+  ground.receiveShadow = true;
+  world.add(ground);
+
+  const apron = makeRibbon(trackCurve, 54, materials.sidewalk, 0.01, 360);
+  world.add(apron);
+
+  const infield = new THREE.Mesh(new THREE.CircleGeometry(52, 64), materials.grassDark);
+  infield.rotation.x = -Math.PI / 2;
+  infield.scale.set(1.18, 0.82, 1);
+  infield.position.set(-15, 0.02, 5);
+  infield.receiveShadow = true;
+  world.add(infield);
+
+  const podium = new THREE.Mesh(new THREE.BoxGeometry(24, 0.8, 14), materials.concrete);
+  podium.position.set(-10, 0.36, 12);
+  podium.receiveShadow = true;
+  world.add(podium);
+
+  const arenaWallShapes = [
+    [0, -128, 270, 7, 0],
+    [0, 128, 270, 7, 0],
+    [-154, 0, 7, 216, 0],
+    [154, 0, 7, 216, 0],
+  ];
+  arenaWallShapes.forEach(([x, z, width, depth]) => {
+    const wall = new THREE.Mesh(new THREE.BoxGeometry(width, 7, depth), materials.arenaWall);
+    wall.position.set(x, 3.45, z);
+    wall.castShadow = true;
+    wall.receiveShadow = true;
+    world.add(wall);
+  });
+
+  const bannerColors = [0xd7f86e, 0x3bb7ff, 0xffcf38, 0xe23d35];
+  for (let i = 0; i < 22; i += 1) {
+    const side = i % 2 === 0 ? -1 : 1;
+    const x = -116 + (i % 11) * 23;
+    const banner = new THREE.Mesh(
+      new THREE.BoxGeometry(15, 3, 0.18),
+      new THREE.MeshBasicMaterial({ color: bannerColors[i % bannerColors.length] }),
+    );
+    banner.position.set(x, 5.3, side * 124.3);
+    world.add(banner);
+  }
+}
+
+function addTrack() {
+  world.add(makeRibbon(trackCurve, 21, materials.asphalt, 0.08));
+  world.add(makeRibbon(trackCurve, 28, materials.shoulderRed, 0.055, 420));
+  world.add(makeRibbon(trackCurve, 25.6, materials.shoulderWhite, 0.065, 420));
+  world.add(makeRibbon(trackCurve, 21, materials.asphalt, 0.09));
+  world.add(makeRacingLine(trackCurve));
+
+  const start = trackCurve.getPointAt(0.02);
+  const tangent = trackCurve.getTangentAt(0.02).normalize();
+  const startNormal = new THREE.Vector3(-tangent.z, 0, tangent.x).normalize();
+  for (let i = -5; i <= 5; i += 1) {
+    const stripe = new THREE.Mesh(
+      new THREE.BoxGeometry(1.4, 0.08, 3.4),
+      i % 2 === 0 ? materials.line : materials.wall,
+    );
+    stripe.position.copy(start).addScaledVector(startNormal, i * 1.55);
+    stripe.position.y = 0.2;
+    stripe.rotation.y = Math.atan2(tangent.x, tangent.z) + Math.PI / 2;
+    world.add(stripe);
+  }
+}
+
+function addPitLane() {
+  const pitCurve = new THREE.CatmullRomCurve3(
+    [
+      new THREE.Vector3(-52, 0, -44),
+      new THREE.Vector3(-22, 0, -50),
+      new THREE.Vector3(12, 0, -47),
+      new THREE.Vector3(39, 0, -32),
+    ],
+    false,
+    "catmullrom",
+    0.4,
+  );
+  world.add(makeRibbon(pitCurve, 8.5, materials.asphalt, 0.12, 150));
+  world.add(makeDashedLine(pitCurve, 0, 2.6, 3.3, 0.22));
+}
+
+function addCheckpointCircle(t, color) {
+  const point = trackCurve.getPointAt(t);
+  const circle = new THREE.Mesh(
+    new THREE.CircleGeometry(10.2, 56),
+    new THREE.MeshBasicMaterial({
+      color,
+      transparent: true,
+      opacity: 0.34,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    }),
+  );
+  circle.rotation.x = -Math.PI / 2;
+  circle.position.set(point.x, 0.27, point.z);
+  circle.visible = false;
+  world.add(circle);
+  checkpointMeshes.push(circle);
+}
+
+function addTrackFurniture() {
+  world.add(makeTrackWall(trackCurve, 14.25, 1.25));
+  world.add(makeTrackWall(trackCurve, -14.25, 1.25));
+
+  checkpointDefinitions.forEach((checkpoint) => {
+    addCheckpointCircle(checkpoint.t, checkpoint.color);
+  });
+}
+
+function addCrowdBlock(origin, columns, rows, spacingX, spacingY, rowDepth, rotationY) {
+  const crowdGeometry = new THREE.BoxGeometry(0.9, 1.2, 0.7);
+  const faceGeometry = new THREE.BoxGeometry(0.46, 0.36, 0.1);
+  const crowd = new THREE.InstancedMesh(crowdGeometry, materials.crowd, columns * rows);
+  const faces = new THREE.InstancedMesh(faceGeometry, materials.crowdFace, columns * rows);
+  const matrix = new THREE.Matrix4();
+  const faceMatrix = new THREE.Matrix4();
+  const color = new THREE.Color();
+  const palette = [0xf3f6ff, 0xd7f86e, 0x3bb7ff, 0xffcf38, 0xe23d35, 0xffffff];
+  let index = 0;
+
+  for (let row = 0; row < rows; row += 1) {
+    for (let column = 0; column < columns; column += 1) {
+      const localX = (column - (columns - 1) / 2) * spacingX;
+      const localY = 2.4 + row * spacingY;
+      const localZ = row * rowDepth;
+      const worldX = origin.x + Math.cos(rotationY) * localX + Math.sin(rotationY) * localZ;
+      const worldZ = origin.z - Math.sin(rotationY) * localX + Math.cos(rotationY) * localZ;
+      const facingY = Math.atan2(-worldX, -worldZ);
+      const faceDirection = new THREE.Vector3(-worldX, 0, -worldZ).normalize();
+      matrix.makeRotationY(facingY);
+      matrix.setPosition(worldX, origin.y + localY, worldZ);
+      faceMatrix.makeRotationY(facingY);
+      faceMatrix.setPosition(worldX + faceDirection.x * 0.42, origin.y + localY + 0.12, worldZ + faceDirection.z * 0.42);
+      crowd.setMatrixAt(index, matrix);
+      faces.setMatrixAt(index, faceMatrix);
+      crowd.setColorAt(index, color.setHex(palette[(row + column) % palette.length]));
+      index += 1;
+    }
+  }
+
+  crowd.instanceMatrix.needsUpdate = true;
+  faces.instanceMatrix.needsUpdate = true;
+  crowd.castShadow = true;
+  faces.castShadow = true;
+  world.add(crowd);
+  world.add(faces);
+}
+
+function addGrandstand(origin, width, rows, rotationY) {
+  const standRotation = rotationY + Math.PI;
+  const stand = new THREE.Group();
+  for (let row = 0; row < rows; row += 1) {
+    const tier = new THREE.Mesh(new THREE.BoxGeometry(width, 1.1, 4.2), materials.seating);
+    tier.position.set(0, 0.65 + row * 1.55, row * 4.2);
+    tier.castShadow = true;
+    tier.receiveShadow = true;
+    stand.add(tier);
+  }
+
+  const roof = new THREE.Mesh(new THREE.BoxGeometry(width + 8, 1.0, 9), materials.guard);
+  roof.position.set(0, rows * 1.55 + 2.8, rows * 4.2 + 2);
+  roof.castShadow = true;
+  stand.add(roof);
+
+  stand.position.copy(origin);
+  stand.rotation.y = standRotation;
+  world.add(stand);
+  addCrowdBlock(origin, Math.floor(width / 3.6), rows, 3.2, 1.55, 4.2, standRotation);
+}
+
+function addStandsAndProps() {
+  addGrandstand(new THREE.Vector3(0, 0.2, -92), 112, 8, 0);
+  addGrandstand(new THREE.Vector3(0, 0.2, 92), 112, 8, Math.PI);
+  addGrandstand(new THREE.Vector3(-112, 0.2, 0), 88, 7, Math.PI / 2);
+  addGrandstand(new THREE.Vector3(112, 0.2, 0), 88, 7, -Math.PI / 2);
+
+  const raceControl = new THREE.Group();
+  const base = new THREE.Mesh(new THREE.BoxGeometry(10, 22, 10), materials.wall);
+  base.position.y = 11;
+  const booth = new THREE.Mesh(new THREE.BoxGeometry(16, 5, 12), materials.glass);
+  booth.position.y = 24.5;
+  raceControl.add(base, booth);
+  raceControl.position.set(-94, 0.1, -82);
+  raceControl.traverse((child) => {
+    child.castShadow = true;
+    child.receiveShadow = true;
+  });
+  world.add(raceControl);
+
+  const screenRig = new THREE.Group();
+  const frame = new THREE.Mesh(new THREE.BoxGeometry(22, 13, 1), materials.wall);
+  frame.position.y = 10;
+  frame.castShadow = true;
+  frame.receiveShadow = true;
+
+  webcamScreen = new THREE.Mesh(new THREE.PlaneGeometry(19, 10.6), standbyScreenMaterial);
+  webcamScreen.position.set(0, 10, 0.56);
+  webcamScreen.rotation.y = Math.PI;
+
+  const mastLeft = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.45, 11, 10), materials.guard);
+  const mastRight = mastLeft.clone();
+  mastLeft.position.set(-8, 4.8, -0.7);
+  mastRight.position.set(8, 4.8, -0.7);
+  screenRig.add(frame, webcamScreen, mastLeft, mastRight);
+  screenRig.position.set(82, 0.1, 84);
+  screenRig.rotation.y = -0.52;
+  world.add(screenRig);
+
+  [
+    [-126, -96],
+    [126, -96],
+    [-126, 96],
+    [126, 96],
+  ].forEach(([x, z]) => {
+    const tower = new THREE.Group();
+    const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.45, 0.65, 32, 12), materials.wall);
+    pole.position.y = 16;
+    const lightBar = new THREE.Mesh(new THREE.BoxGeometry(13, 2, 2), materials.guard);
+    lightBar.position.y = 32.6;
+    tower.add(pole, lightBar);
+
+    [-4, 0, 4].forEach((offset) => {
+      const lamp = new THREE.SpotLight(0xfff4c7, 2.4, 185, Math.PI / 5, 0.42, 1.1);
+      lamp.position.set(offset, 31.6, 0);
+      lamp.target.position.set(0, 0, 0);
+      tower.add(lamp, lamp.target);
+    });
+
+    tower.position.set(x, 0, z);
+    tower.rotation.y = Math.atan2(-x, -z);
+    tower.traverse((child) => {
+      child.castShadow = true;
+      child.receiveShadow = true;
+    });
+    world.add(tower);
+  });
+}
+
+function createWedgeBodyGeometry() {
+  const vertices = new Float32Array([
+    -2.4, 0, -3.7,
+    2.4, 0, -3.7,
+    2.0, 0, 3.5,
+    -2.0, 0, 3.5,
+    -1.9, 1.0, -2.6,
+    1.9, 1.0, -2.6,
+    1.35, 0.72, 3.3,
+    -1.35, 0.72, 3.3,
+    -1.3, 1.35, -0.95,
+    1.3, 1.35, -0.95,
+    1.05, 1.15, 1.1,
+    -1.05, 1.15, 1.1,
+  ]);
+  const indices = [
+    0, 1, 5,
+    0, 5, 4,
+    1, 2, 6,
+    1, 6, 5,
+    2, 3, 7,
+    2, 7, 6,
+    3, 0, 4,
+    3, 4, 7,
+    4, 5, 9,
+    4, 9, 8,
+    5, 6, 10,
+    5, 10, 9,
+    6, 7, 11,
+    6, 11, 10,
+    7, 4, 8,
+    7, 8, 11,
+    8, 9, 10,
+    8, 10, 11,
+    0, 3, 2,
+    0, 2, 1,
+  ];
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.BufferAttribute(vertices, 3));
+  geometry.setIndex(indices);
+  geometry.computeVertexNormals();
+  return geometry;
+}
+
+function createCar(color, trimColor = 0x111111) {
+  const car = new THREE.Group();
+  const body = new THREE.Mesh(createWedgeBodyGeometry(), color);
+  body.userData.paint = true;
+  body.position.y = 0.48;
+  body.castShadow = true;
+
+  const nose = new THREE.Mesh(new THREE.BoxGeometry(3.5, 0.18, 2.1), color);
+  nose.userData.paint = true;
+  nose.position.set(0, 0.86, -2.8);
+  nose.rotation.x = 0.09;
+  nose.castShadow = true;
+
+  const cockpit = new THREE.Mesh(new THREE.BoxGeometry(2.15, 0.78, 1.8), materials.glass);
+  cockpit.position.set(0, 1.65, -0.3);
+  cockpit.scale.set(1, 0.7, 1);
+  cockpit.castShadow = true;
+
+  const wing = new THREE.Mesh(new THREE.BoxGeometry(5.2, 0.24, 0.9), new THREE.MeshStandardMaterial({ color: trimColor }));
+  wing.position.set(0, 1.28, 3.42);
+  wing.castShadow = true;
+
+  const splitter = new THREE.Mesh(new THREE.BoxGeometry(5.2, 0.14, 0.55), new THREE.MeshStandardMaterial({ color: trimColor }));
+  splitter.position.set(0, 0.42, -3.78);
+  splitter.castShadow = true;
+
+  const wheelMaterial = new THREE.MeshStandardMaterial({ color: 0x0c0d0d, roughness: 0.55 });
+  [-2.22, 2.22].forEach((x) => {
+    [-2.48, 2.35].forEach((z) => {
+      const wheel = new THREE.Mesh(new THREE.CylinderGeometry(0.7, 0.7, 0.68, 24), wheelMaterial);
+      wheel.rotation.z = Math.PI / 2;
+      wheel.position.set(x, 0.55, z);
+      wheel.castShadow = true;
+      car.add(wheel);
+    });
+  });
+
+  const headlightMaterial = new THREE.MeshBasicMaterial({ color: 0xd8fff5 });
+  [-1.05, 1.05].forEach((x) => {
+    const headlight = new THREE.Mesh(new THREE.BoxGeometry(0.78, 0.12, 0.08), headlightMaterial);
+    headlight.position.set(x, 0.88, -3.86);
+    car.add(headlight);
+  });
+
+  car.add(body, nose, cockpit, wing, splitter);
+  return car;
+}
+
+const playerCar = createCar(materials.red, 0x111111);
+const rivalCar = createCar(materials.blue, 0xf5f1e8);
+const paceCar = createCar(materials.yellow, 0x222222);
+world.add(playerCar, rivalCar, paceCar);
+
+function markCarForHover(car, fallbackName) {
+  car.userData.hoverName = fallbackName;
+  car.traverse((child) => {
+    child.userData.hoverCar = car;
+  });
+}
+
+function createCarNameLabel() {
+  const label = document.createElement("p");
+  label.className = "car-name-label is-hidden";
+  label.setAttribute("aria-hidden", "true");
+  document.querySelector("#app").append(label);
+  return label;
+}
+
+function ensureCarNameLabel(car) {
+  if (!car.userData.nameLabel) {
+    car.userData.nameLabel = createCarNameLabel();
+  }
+  return car.userData.nameLabel;
+}
+
+function setCarDisplayName(car, name) {
+  car.userData.hoverName = name;
+  ensureCarNameLabel(car).textContent = name;
+}
+
+markCarForHover(playerCar, "Player 1");
+markCarForHover(rivalCar, "Player 2");
+markCarForHover(paceCar, "Pace Car");
+setCarDisplayName(playerCar, "Player 1");
+setCarDisplayName(rivalCar, "Rival");
+setCarDisplayName(paceCar, "Pace Car");
+const remotePlayerCars = new Map();
+
+function getLocalPlayer() {
+  return raceState.players.find((player) => player.id === raceState.playerId);
+}
+
+function getOpponentPlayer() {
+  return raceState.players.find((player) => player.id !== raceState.playerId);
+}
+
+function getMultiplayerStartPose(index = 0) {
+  const lane = multiplayerCarLanes[index % multiplayerCarLanes.length];
+  const point = trackCurve.getPointAt(gridStartProgress);
+  const tangent = trackCurve.getTangentAt(gridStartProgress).normalize();
+  const normal = new THREE.Vector3(-tangent.z, 0, tangent.x).normalize();
+  point.addScaledVector(normal, lane);
+  return {
+    x: point.x,
+    z: point.z,
+    heading: Math.atan2(tangent.x, tangent.z),
+    progress: gridStartProgress,
+  };
+}
+
+function getPlayerCarState() {
+  return {
+    x: playerControl.position.x,
+    z: playerControl.position.z,
+    heading: playerControl.heading,
+    progress: playerControl.progress,
+    speed: playerControl.speed,
+    updatedAt: Date.now(),
+  };
+}
+
+function setCarPaint(car, playerIndex) {
+  const [bodyColor] = multiplayerCarColors[playerIndex % multiplayerCarColors.length];
+  car.traverse((child) => {
+    if (child.userData.paint && child.material?.color) {
+      child.material.color.setHex(bodyColor);
+    }
+  });
+}
+
+function applyCarStateToPlayerControl(carState) {
+  if (!carState) return;
+  playerControl.position.set(carState.x, 0, carState.z);
+  playerControl.heading = carState.heading;
+  playerControl.progress = carState.progress ?? playerControl.progress;
+  placePlayerCar();
+}
+
+function updateLocalMultiplayerCarState(force = false) {
+  if (raceState.mode !== "multiplayer" || !raceState.roomCode || !raceState.playerId) return;
+  const now = Date.now();
+  if (!force && now - lastMultiplayerPositionSync < 80) return;
+  lastMultiplayerPositionSync = now;
+  const updatedRoom = updateStoredRoom(raceState.roomCode, (room) => ({
+    ...room,
+    players: room.players.map((player) =>
+      player.id === raceState.playerId ? { ...player, carState: getPlayerCarState() } : player,
+    ),
+  }));
+  if (updatedRoom) {
+    raceState.players = updatedRoom.players;
+  }
+}
+
+function applyLocalMultiplayerIdentity() {
+  if (raceState.mode !== "multiplayer") return;
+  const localIndex = Math.max(
+    0,
+    raceState.players.findIndex((player) => player.id === raceState.playerId),
+  );
+  setCarPaint(playerCar, localIndex);
+  const localPlayer = getLocalPlayer();
+  if (localPlayer?.carState && raceState.phase !== "racing") {
+    applyCarStateToPlayerControl(localPlayer.carState);
+  }
+}
+
+function updateCarHoverNames() {
+  const localPlayer = getLocalPlayer();
+  const opponentPlayer = getOpponentPlayer();
+  setCarDisplayName(playerCar, localPlayer?.name || raceState.playerName || "Player 1");
+  setCarDisplayName(rivalCar, raceState.mode === "multiplayer" ? opponentPlayer?.name || "Player 2" : "Rival");
+  setCarDisplayName(paceCar, "Pace Car");
+  remotePlayerCars.forEach((car, playerId) => {
+    const player = raceState.players.find((item) => item.id === playerId);
+    setCarDisplayName(car, player?.name || "Player");
+  });
+}
+
+function placeCar(car, t, laneOffset, yawOffset = 0) {
+  const point = trackCurve.getPointAt(t % 1);
+  const tangent = trackCurve.getTangentAt(t % 1).normalize();
+  const normal = new THREE.Vector3(-tangent.z, 0, tangent.x).normalize();
+  point.addScaledVector(normal, laneOffset);
+  car.position.set(point.x, 0.24, point.z);
+  car.rotation.y = Math.atan2(tangent.x, tangent.z) + yawOffset + carModelRotationOffset;
+}
+
+function placePlayerCar() {
+  playerCar.position.set(playerControl.position.x, 0.24, playerControl.position.z);
+  playerCar.rotation.y = playerControl.heading + carModelRotationOffset;
+}
+
+function placePlayerOnTrack(t, laneOffset) {
+  playerControl.progress = t;
+  const point = trackCurve.getPointAt(t);
+  const tangent = trackCurve.getTangentAt(t).normalize();
+  const normal = new THREE.Vector3(-tangent.z, 0, tangent.x).normalize();
+  point.addScaledVector(normal, laneOffset);
+  playerControl.position.copy(point);
+  playerControl.heading = Math.atan2(tangent.x, tangent.z);
+  placePlayerCar();
+}
+
+function updateOpponentVisibility() {
+  const showAiCars = raceState.mode !== "multiplayer";
+  if (showAiCars) {
+    setCarPaint(playerCar, 0);
+  }
+  rivalCar.visible = showAiCars;
+  paceCar.visible = showAiCars;
+  remotePlayerCars.forEach((car) => {
+    car.visible = raceState.mode === "multiplayer";
+  });
+  updateCarHoverNames();
+  updateCarNameLabels();
+}
+
+function createRemotePlayerCar(playerIndex) {
+  const [bodyColor, trimColor] = multiplayerCarColors[playerIndex % multiplayerCarColors.length];
+  const car = createCar(new THREE.MeshStandardMaterial({ color: bodyColor, roughness: 0.45, metalness: 0.15 }), trimColor);
+  markCarForHover(car, "Player");
+  car.visible = raceState.mode === "multiplayer";
+  world.add(car);
+  return car;
+}
+
+function renderRemotePlayerCars() {
+  if (raceState.mode !== "multiplayer") {
+    remotePlayerCars.forEach((car) => {
+      car.visible = false;
+    });
+    return;
+  }
+
+  const remotePlayers = raceState.players.filter((player) => player.id !== raceState.playerId);
+  const activeRemoteIds = new Set(remotePlayers.map((player) => player.id));
+
+  remotePlayerCars.forEach((car, playerId) => {
+    if (!activeRemoteIds.has(playerId)) {
+      car.visible = false;
+    }
+  });
+
+  remotePlayers.forEach((player, remoteIndex) => {
+    const playerIndex = raceState.players.findIndex((item) => item.id === player.id);
+    let car = remotePlayerCars.get(player.id);
+    if (!car) {
+      car = createRemotePlayerCar(Math.max(playerIndex, remoteIndex + 1));
+      remotePlayerCars.set(player.id, car);
+    }
+
+    const carState = player.carState ?? getMultiplayerStartPose(Math.max(playerIndex, remoteIndex + 1));
+    car.position.set(carState.x, 0.24, carState.z);
+    car.rotation.y = carState.heading + carModelRotationOffset;
+    setCarDisplayName(car, player.name);
+    car.visible = true;
+  });
+}
+
+function setHoveredCar(car) {
+  hoveredCar = car?.visible ? car : null;
+  carHoverLabel.classList.toggle("is-visible", Boolean(hoveredCar));
+  if (hoveredCar) {
+    carHoverLabel.textContent = hoveredCar.userData.hoverName;
+  }
+}
+
+function updateCarHoverLabel() {
+  if (!hoveredCar || !hoveredCar.visible) {
+    setHoveredCar(null);
+    return;
+  }
+  carHoverLabel.textContent = hoveredCar.userData.hoverName;
+  const labelPosition = hoveredCar.position.clone();
+  labelPosition.y += 5.2;
+  labelPosition.project(camera);
+  carHoverLabel.style.left = `${((labelPosition.x + 1) / 2) * window.innerWidth}px`;
+  carHoverLabel.style.top = `${((-labelPosition.y + 1) / 2) * window.innerHeight}px`;
+}
+
+function updateCarNameLabel(car, visible) {
+  const label = ensureCarNameLabel(car);
+  const shouldShow = visible && car.visible && raceState.mode === "multiplayer";
+  label.classList.toggle("is-hidden", !shouldShow);
+  if (!shouldShow) return;
+
+  label.textContent = car.userData.hoverName;
+  const labelPosition = car.position.clone();
+  labelPosition.y += 6.3;
+  labelPosition.project(camera);
+  label.style.left = `${((labelPosition.x + 1) / 2) * window.innerWidth}px`;
+  label.style.top = `${((-labelPosition.y + 1) / 2) * window.innerHeight}px`;
+}
+
+function updateCarNameLabels() {
+  updateCarNameLabel(playerCar, false);
+  updateCarNameLabel(rivalCar, false);
+  updateCarNameLabel(paceCar, false);
+  remotePlayerCars.forEach((car) => {
+    updateCarNameLabel(car, raceState.mode === "multiplayer");
+  });
+}
+
+function updateHoveredCar(event) {
+  const rect = renderer.domElement.getBoundingClientRect();
+  pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+  pointer.y = -(((event.clientY - rect.top) / rect.height) * 2 - 1);
+  raycaster.setFromCamera(pointer, camera);
+  const hoverCars = [playerCar, rivalCar, paceCar, ...remotePlayerCars.values()];
+  const hit = raycaster.intersectObjects(hoverCars, true).find((intersection) => {
+    const car = intersection.object.userData.hoverCar;
+    return car?.visible;
+  });
+  setHoveredCar(hit?.object.userData.hoverCar ?? null);
+  updateCarHoverLabel();
+}
+
+function placeStartingGrid() {
+  updateOpponentVisibility();
+  if (raceState.mode === "multiplayer") {
+    const localIndex = Math.max(
+      0,
+      raceState.players.findIndex((player) => player.id === raceState.playerId),
+    );
+    const localPlayer = getLocalPlayer();
+    if (localPlayer?.carState) {
+      applyCarStateToPlayerControl(localPlayer.carState);
+    } else {
+      placePlayerOnTrack(gridStartProgress, multiplayerCarLanes[localIndex % multiplayerCarLanes.length]);
+    }
+    renderRemotePlayerCars();
+    return;
+  }
+
+  placePlayerOnTrack(gridStartProgress, startingGrid.playerLane);
+  placeCar(rivalCar, gridStartProgress, startingGrid.rivalLane);
+  placeCar(paceCar, gridStartProgress, startingGrid.paceLane);
+}
+
+function addLighting() {
+  const sun = new THREE.DirectionalLight(0xffffff, 2.4);
+  sun.position.set(-72, 110, 64);
+  sun.castShadow = true;
+  sun.shadow.mapSize.set(2048, 2048);
+  sun.shadow.camera.near = 10;
+  sun.shadow.camera.far = 260;
+  sun.shadow.camera.left = -150;
+  sun.shadow.camera.right = 150;
+  sun.shadow.camera.top = 150;
+  sun.shadow.camera.bottom = -150;
+  scene.add(sun);
+
+  scene.add(new THREE.HemisphereLight(0xcfe8ff, 0x274722, 1.4));
+
+  const lampMaterial = new THREE.MeshStandardMaterial({ color: 0x35383a, roughness: 0.5 });
+  for (let i = 0; i < 14; i += 1) {
+    const t = i / 14;
+    const point = trackCurve.getPointAt(t);
+    const tangent = trackCurve.getTangentAt(t).normalize();
+    const normal = new THREE.Vector3(-tangent.z, 0, tangent.x).normalize();
+    point.addScaledVector(normal, i % 2 ? 19 : -19);
+
+    const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.28, 12, 10), lampMaterial);
+    pole.position.set(point.x, 6, point.z);
+    pole.castShadow = true;
+    world.add(pole);
+
+    const head = new THREE.PointLight(0xfff3be, 0.75, 28);
+    head.position.set(point.x, 12.2, point.z);
+    world.add(head);
+  }
+}
+
+function formatRaceTime(seconds) {
+  const minutes = Math.floor(seconds / 60);
+  const remainder = seconds - minutes * 60;
+  return `${minutes}:${remainder.toFixed(1).padStart(4, "0")}`;
+}
+
+function resetPlayerAtStart() {
+  playerControl.speed = 0;
+  playerControl.targetSpeed = 0;
+  playerControl.steer = 0;
+  playerControl.targetSteer = 0;
+  playerControl.handActive = false;
+  placeStartingGrid();
+}
+
+function resetRaceState() {
+  raceState.lapsCompleted = 0;
+  raceState.nextCheckpoint = 1;
+  raceState.started = false;
+  raceState.finished = false;
+  raceState.startTime = 0;
+  raceState.elapsed = 0;
+  raceState.checkpointCooldown = 0.75;
+  raceState.countdownRemaining = raceState.countdownDuration;
+  resetPlayerAtStart();
+}
+
+function updateGameUi() {
+  document.body.dataset.racePhase = raceState.phase;
+  document.body.dataset.raceMode = raceState.mode;
+  gameMenu.dataset.state = raceState.phase === "finished" ? "menu" : raceState.phase;
+  countdownLabel.textContent = String(Math.max(Math.ceil(raceState.countdownRemaining), 0));
+  updateOpponentVisibility();
+}
+
+function updateCheckpointVisibility() {
+  checkpointMeshes.forEach((mesh, index) => {
+    mesh.visible =
+      raceState.phase === "racing" &&
+      !raceState.finished &&
+      index !== startCheckpointIndex &&
+      index === raceState.nextCheckpoint;
+  });
+}
+
+function updateRaceHud() {
+  const lapsLeft = Math.max(raceState.totalLaps - raceState.lapsCompleted, 0);
+  lapsLeftLabel.textContent = raceState.finished ? "Win" : String(lapsLeft);
+  raceTimerLabel.textContent = formatRaceTime(raceState.elapsed);
+}
+
+function showCheckpointFeedback(message) {
+  if (!checkpointFeedback) return;
+
+  window.clearTimeout(checkpointFeedbackTimer);
+  checkpointFeedback.textContent = message;
+  checkpointFeedback.classList.add("is-visible");
+  checkpointFeedbackTimer = window.setTimeout(() => {
+    checkpointFeedback.classList.remove("is-visible");
+  }, 1450);
+}
+
+function startRace(now = getRaceClockTime()) {
+  raceState.phase = "racing";
+  raceState.started = true;
+  raceState.finished = false;
+  raceState.startTime = now;
+  raceState.elapsed = 0;
+  raceState.checkpointCooldown = 0.75;
+  setCameraMode("chase");
+  if (!webcamStream) {
+    setHandStatus("waiting for driver cam");
+  }
+  updateLocalMultiplayerCarState(true);
+  updateGameUi();
+  updateCheckpointVisibility();
+  updateRaceHud();
+}
+
+function beginCountdown(mode = "singleplayer") {
+  resetRaceState();
+  raceState.mode = mode;
+  raceState.phase = "countdown";
+  raceState.countdownStartTime = getRaceClockTime();
+  raceState.countdownRemaining = raceState.countdownDuration;
+  setCameraMode("chase");
+  setHandStatus("starting");
+  if (!webcamStream) {
+    void startWebcam();
+  }
+  updateGameUi();
+  updateCheckpointVisibility();
+  updateRaceHud();
+}
+
+function beginSharedMultiplayerCountdown(startedAt) {
+  if (raceState.phase === "countdown" || raceState.phase === "racing") return;
+  resetRaceState();
+  raceState.mode = "multiplayer";
+  raceState.phase = "countdown";
+  const countdownElapsed = Math.max(0, (Date.now() - startedAt) / 1000);
+  raceState.countdownStartTime = getRaceClockTime() - countdownElapsed;
+  raceState.countdownRemaining = Math.max(0, raceState.countdownDuration - countdownElapsed);
+  setCameraMode("chase");
+  setHandStatus("starting");
+  if (!webcamStream) {
+    void startWebcam();
+  }
+  updateGameUi();
+  updateCheckpointVisibility();
+  updateRaceHud();
+}
+
+function showMultiplayerConfig() {
+  raceState.mode = "multiplayer";
+  raceState.phase = "multiplayer-config";
+  resetRaceState();
+  raceState.mode = "multiplayer";
+  raceState.phase = "multiplayer-config";
+  raceState.isLeader = false;
+  raceState.players = [];
+  multiplayerConfigForm.dataset.step = "choose";
+  multiplayerMessage.classList.remove("is-visible");
+  activeRoomCodeLabel.textContent = "----";
+  roomPlayerList.innerHTML = "";
+  readyToggleButton.textContent = "Ready";
+  startMultiplayerButton.hidden = false;
+  startMultiplayerButton.disabled = true;
+  updateGameUi();
+}
+
+function showMainMenu() {
+  raceState.mode = "singleplayer";
+  raceState.phase = "menu";
+  resetRaceState();
+  raceState.mode = "singleplayer";
+  raceState.phase = "menu";
+  updateGameUi();
+}
+
+function showMultiplayerMessage(message) {
+  multiplayerMessage.textContent = message;
+  multiplayerMessage.classList.add("is-visible");
+}
+
+function getPlayerName() {
+  return playerNameInput.value.trim();
+}
+
+function getPlayerId() {
+  if (!raceState.playerId) {
+    raceState.playerId =
+      crypto.randomUUID?.() ?? `player-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  }
+  return raceState.playerId;
+}
+
+function getStoredRooms() {
+  try {
+    return JSON.parse(localStorage.getItem(multiplayerStorageKey)) ?? {};
+  } catch (error) {
+    console.warn("Could not read multiplayer rooms:", error);
+    return {};
+  }
+}
+
+function saveStoredRooms(rooms) {
+  localStorage.setItem(multiplayerStorageKey, JSON.stringify(rooms));
+  multiplayerRoomChannel?.postMessage({ type: "rooms-updated" });
+}
+
+function getStoredRoom(roomCode = raceState.roomCode) {
+  return getStoredRooms()[roomCode];
+}
+
+function createRoomCode(existingRooms = getStoredRooms()) {
+  let code = "";
+  do {
+    code = Math.random().toString(36).slice(2, 6).toUpperCase();
+  } while (existingRooms[code]);
+  return code;
+}
+
+function updateStoredRoom(roomCode, updater) {
+  const rooms = getStoredRooms();
+  const room = rooms[roomCode];
+  if (!room) return null;
+  const updatedRoom = updater(room);
+  rooms[roomCode] = updatedRoom;
+  saveStoredRooms(rooms);
+  return updatedRoom;
+}
+
+function syncCurrentRoom() {
+  const isActiveRoomView =
+    multiplayerConfigForm.dataset.step === "lobby" || raceState.phase === "countdown" || raceState.phase === "racing";
+  if (!raceState.roomCode || raceState.mode !== "multiplayer" || !isActiveRoomView) return;
+  const room = getStoredRoom();
+  if (!room) {
+    showMultiplayerConfig();
+    showMultiplayerMessage("Room closed.");
+    return;
+  }
+  raceState.players = room.players;
+  applyLocalMultiplayerIdentity();
+  renderRemotePlayerCars();
+  if (room.started && room.startedAt) {
+    beginSharedMultiplayerCountdown(room.startedAt);
+    return;
+  }
+  if (multiplayerConfigForm.dataset.step === "lobby") {
+    renderRoomLobby();
+  }
+}
+
+function renderRoomLobby() {
+  activeRoomCodeLabel.textContent = raceState.roomCode;
+  roomPlayerList.innerHTML = "";
+  raceState.players.forEach((player) => {
+    const item = document.createElement("li");
+    item.classList.toggle("is-ready", player.ready);
+    item.textContent = player.leader ? `${player.name} (Leader)` : player.name;
+    const status = document.createElement("span");
+    status.textContent = player.ready ? "Ready" : "Waiting";
+    item.append(status);
+    roomPlayerList.append(item);
+  });
+  const localPlayer = raceState.players.find((player) => player.id === raceState.playerId);
+  const otherPlayers = raceState.players.filter((player) => !player.leader);
+  const allOtherPlayersReady = otherPlayers.length > 0 && otherPlayers.every((player) => player.ready);
+  readyToggleButton.hidden = raceState.isLeader;
+  readyToggleButton.textContent = localPlayer?.ready ? "Unready" : "Ready";
+  leaderWaitingMessage.classList.toggle("is-visible", raceState.isLeader && otherPlayers.length === 0);
+  startMultiplayerButton.hidden = !raceState.isLeader;
+  startMultiplayerButton.disabled = !raceState.isLeader || !allOtherPlayersReady;
+}
+
+function enterLobby({ roomCode, isLeader, players }) {
+  raceState.roomCode = roomCode.toUpperCase();
+  raceState.isLeader = isLeader;
+  raceState.players = players;
+  playerNameInput.value = raceState.playerName;
+  roomCodeInput.value = isLeader ? "" : raceState.roomCode;
+  multiplayerMessage.classList.remove("is-visible");
+  multiplayerConfigForm.dataset.step = "lobby";
+  applyLocalMultiplayerIdentity();
+  renderRemotePlayerCars();
+  renderRoomLobby();
+}
+
+function createMultiplayerRoom() {
+  const playerName = getPlayerName();
+  if (!playerName) {
+    showMultiplayerMessage("Enter your name before creating a room.");
+    return;
+  }
+  raceState.playerName = playerName;
+  const rooms = getStoredRooms();
+  const roomCode = createRoomCode(rooms);
+  const leader = {
+    id: getPlayerId(),
+    name: raceState.playerName,
+    ready: true,
+    leader: true,
+    carState: getMultiplayerStartPose(0),
+  };
+  rooms[roomCode] = { code: roomCode, players: [leader], started: false };
+  saveStoredRooms(rooms);
+  enterLobby({ roomCode, isLeader: true, players: rooms[roomCode].players });
+}
+
+function showJoinRoom() {
+  const playerName = getPlayerName();
+  if (!playerName) {
+    showMultiplayerMessage("Enter your name before joining a room.");
+    return;
+  }
+  raceState.playerName = playerName;
+  playerNameInput.value = raceState.playerName;
+  multiplayerConfigForm.dataset.step = "join";
+  multiplayerMessage.classList.remove("is-visible");
+  roomCodeInput.focus();
+}
+
+function returnToMultiplayerChoices() {
+  multiplayerConfigForm.dataset.step = "choose";
+  multiplayerMessage.classList.remove("is-visible");
+  roomCodeInput.value = "";
+  activeRoomCodeLabel.textContent = "----";
+  roomPlayerList.innerHTML = "";
+  readyToggleButton.textContent = "Ready";
+  startMultiplayerButton.hidden = false;
+  startMultiplayerButton.disabled = true;
+}
+
+function handleMultiplayerBack() {
+  if (multiplayerConfigForm.dataset.step === "join") {
+    returnToMultiplayerChoices();
+    return;
+  }
+  showMainMenu();
+}
+
+function joinMultiplayerRoom() {
+  const playerName = raceState.playerName;
+  const roomCode = roomCodeInput.value.trim().toUpperCase();
+  if (!roomCode) {
+    showMultiplayerMessage("Enter a room code to join.");
+    return;
+  }
+  if (!playerName) {
+    showMultiplayerMessage("Enter your name before joining a room.");
+    return;
+  }
+  const room = getStoredRoom(roomCode);
+  if (!room) {
+    showMultiplayerMessage("Room code not found.");
+    return;
+  }
+  raceState.playerName = playerName;
+  const playerId = getPlayerId();
+  const isRejoiningPlayer = room.players.some((player) => player.id === playerId);
+  if (!isRejoiningPlayer && room.players.length >= maxMultiplayerPlayers) {
+    showMultiplayerMessage("Lobby full.");
+    return;
+  }
+  const updatedRoom = updateStoredRoom(roomCode, (currentRoom) => {
+    const players = currentRoom.players.filter((player) => player.id !== playerId);
+    players.push({
+      id: playerId,
+      name: raceState.playerName,
+      ready: false,
+      leader: false,
+      carState: getMultiplayerStartPose(players.length),
+    });
+    return { ...currentRoom, players };
+  });
+  enterLobby({ roomCode, isLeader: false, players: updatedRoom.players });
+  if (updatedRoom.started && updatedRoom.startedAt) {
+    beginSharedMultiplayerCountdown(updatedRoom.startedAt);
+  }
+}
+
+function toggleReady() {
+  const updatedRoom = updateStoredRoom(raceState.roomCode, (room) => ({
+    ...room,
+    players: room.players.map((player) =>
+      player.id === raceState.playerId && !player.leader ? { ...player, ready: !player.ready } : player,
+    ),
+  }));
+  if (!updatedRoom) return;
+  raceState.players = updatedRoom.players;
+  renderRoomLobby();
+}
+
+function startConfiguredMultiplayer() {
+  if (!raceState.isLeader) {
+    showMultiplayerMessage("Only the room leader can start.");
+    return;
+  }
+  const room = getStoredRoom();
+  if (!room) {
+    showMultiplayerMessage("Room closed.");
+    return;
+  }
+  raceState.players = room.players;
+  const otherPlayers = raceState.players.filter((player) => !player.leader);
+  if (!otherPlayers.length) {
+    showMultiplayerMessage("Waiting for other players.");
+    renderRoomLobby();
+    return;
+  }
+  if (!otherPlayers.every((player) => player.ready)) {
+    showMultiplayerMessage("Waiting for other players to be ready.");
+    renderRoomLobby();
+    return;
+  }
+  const startedAt = Date.now();
+  updateStoredRoom(raceState.roomCode, (currentRoom) => ({ ...currentRoom, started: true, startedAt }));
+  beginSharedMultiplayerCountdown(startedAt);
+}
+
+function completeCurrentCheckpoint() {
+  const reachedCheckpoint = raceState.nextCheckpoint;
+  raceState.checkpointCooldown = 0.75;
+
+  if (raceState.nextCheckpoint === startCheckpointIndex) {
+    raceState.lapsCompleted += 1;
+    raceState.nextCheckpoint = 1;
+  } else {
+    raceState.nextCheckpoint += 1;
+    if (raceState.nextCheckpoint >= checkpointDefinitions.length) {
+      raceState.nextCheckpoint = startCheckpointIndex;
+    }
+  }
+
+  if (raceState.lapsCompleted >= raceState.totalLaps) {
+    raceState.finished = true;
+    raceState.started = false;
+    raceState.phase = "finished";
+    playerControl.handActive = false;
+    playerControl.speed = 0;
+    playerControl.targetSpeed = 0;
+    playerControl.steer = 0;
+    playerControl.targetSteer = 0;
+    setHandStatus("winner");
+    updateGameUi();
+    showCheckpointFeedback("You win!");
+  } else if (reachedCheckpoint === startCheckpointIndex) {
+    showCheckpointFeedback("Lap complete");
+  } else {
+    showCheckpointFeedback("Checkpoint reached");
+  }
+
+  updateCheckpointVisibility();
+  updateRaceHud();
+}
+
+function updateCheckpointProgress(delta) {
+  if (!raceState.started || raceState.finished) return;
+
+  raceState.checkpointCooldown = Math.max(0, raceState.checkpointCooldown - delta);
+  if (raceState.checkpointCooldown > 0) return;
+
+  const checkpoint = checkpointMeshes[raceState.nextCheckpoint];
+  const distance = Math.hypot(
+    playerControl.position.x - checkpoint.position.x,
+    playerControl.position.z - checkpoint.position.z,
+  );
+
+  if (distance <= checkpointRadius) {
+    completeCurrentCheckpoint();
+  }
+}
+
+addGround();
+addTrack();
+addPitLane();
+addTrackFurniture();
+addStandsAndProps();
+addLighting();
+updateGameUi();
+updateCheckpointVisibility();
+updateRaceHud();
+resetPlayerAtStart();
+
+const webcamStates = {
+  idle: {
+    status: "Off",
+    message: "Ready",
+    canStart: true,
+    canStop: false,
+  },
+  loading: {
+    status: "Loading",
+    message: "Waiting for camera permission...",
+    canStart: false,
+    canStop: false,
+  },
+  live: {
+    status: "Live",
+    message: "",
+    canStart: false,
+    canStop: true,
+  },
+  denied: {
+    status: "Blocked",
+    message: "Camera permission denied.",
+    canStart: true,
+    canStop: false,
+  },
+  "no-camera": {
+    status: "No camera",
+    message: "No camera found.",
+    canStart: true,
+    canStop: false,
+  },
+  busy: {
+    status: "Busy",
+    message: "Camera is already in use.",
+    canStart: true,
+    canStop: false,
+  },
+  unavailable: {
+    status: "Unavailable",
+    message: "Camera access is unavailable here.",
+    canStart: false,
+    canStop: false,
+  },
+  error: {
+    status: "Error",
+    message: "Camera could not start.",
+    canStart: true,
+    canStop: false,
+  },
+};
+
+function setWebcamState(state, messageOverride) {
+  const nextState = webcamStates[state] ?? webcamStates.error;
+  webcamPanel.dataset.state = state;
+  webcamStatus.textContent = nextState.status;
+  webcamMessage.textContent = messageOverride ?? nextState.message;
+  if (webcamStartButton) {
+    webcamStartButton.disabled = !nextState.canStart;
+    webcamStartButton.classList.toggle("active", nextState.canStart);
+  }
+  if (webcamStopButton) {
+    webcamStopButton.disabled = !nextState.canStop;
+    webcamStopButton.classList.toggle("active", nextState.canStop);
+  }
+}
+
+function setHandStatus(message) {
+  handStatus.textContent = `Controls: ${message}`;
+}
+
+function getHandCenter(landmarks) {
+  return [0, 5, 9, 13, 17].reduce(
+    (center, index) => {
+      center.x += landmarks[index].x / 5;
+      center.y += landmarks[index].y / 5;
+      return center;
+    },
+    { x: 0, y: 0 },
+  );
+}
+
+function getHandClosedScore(landmarks) {
+  const fingers = [
+    [8, 6],
+    [12, 10],
+    [16, 14],
+    [20, 18],
+  ];
+  const extended = fingers.reduce((count, [tip, joint]) => count + (landmarks[tip].y < landmarks[joint].y ? 1 : 0), 0);
+  return THREE.MathUtils.clamp(1 - extended / fingers.length, 0, 1);
+}
+
+function getTrackedHands(hands) {
+  return (hands ?? [])
+    .map((landmarks) => {
+      const center = getHandCenter(landmarks);
+      return {
+        landmarks,
+        center,
+        visualX: 1 - center.x,
+        closedScore: getHandClosedScore(landmarks),
+      };
+    })
+    .sort((a, b) => a.visualX - b.visualX);
+}
+
+function updateThrottleFromHands(hands) {
+  const trackedHands = getTrackedHands(hands);
+
+  if (!trackedHands.length) {
+    playerControl.targetSpeed = 0;
+    return {
+      available: false,
+      message: "show hands for speed",
+      trackedHands,
+    };
+  }
+
+  const closedScore = trackedHands.reduce((sum, hand) => sum + hand.closedScore, 0) / trackedHands.length;
+  let throttle = 0;
+  if (closedScore >= handControlGuide.fistThreshold) {
+    throttle = (closedScore - handControlGuide.fistThreshold) / (1 - handControlGuide.fistThreshold);
+  }
+
+  const deadZoneThrottle = Math.abs(throttle) < 0.08 ? 0 : THREE.MathUtils.clamp(throttle, 0, 1);
+  const speed = deadZoneThrottle * handControlGuide.maxSpeed;
+  const throttleText =
+    deadZoneThrottle === 0
+      ? "open slow down"
+      : "fist speed up";
+
+  return {
+    available: true,
+    trackedHands,
+    closedScore,
+    throttle: deadZoneThrottle,
+    speed,
+    throttleText,
+  };
+}
+
+function updateSteeringFromHands(hands) {
+  const trackedHands = getTrackedHands(hands);
+
+  if (trackedHands.length < 2) {
+    return {
+      available: false,
+      message: "show both hands for steering",
+      trackedHands,
+    };
+  }
+
+  const leftHand = trackedHands[0];
+  const rightHand = trackedHands[trackedHands.length - 1];
+  const handsOnSides = leftHand.visualX < 0.5 && rightHand.visualX >= 0.5;
+  const yDelta = rightHand.center.y - leftHand.center.y;
+  const steer = Math.abs(yDelta) < handControlGuide.steerDeadZone ? 0 : THREE.MathUtils.clamp(-yDelta / handControlGuide.maxSteerDelta, -1, 1);
+  const steeringText = Math.abs(steer) < 0.18 ? "straight" : steer > 0 ? "right" : "left";
+
+  return {
+    available: handsOnSides,
+    message: handsOnSides ? "" : "hands on both sides",
+    trackedHands,
+    leftHand,
+    rightHand,
+    yDelta,
+    steer,
+    steeringText,
+  };
+}
+
+function updatePlayerControls(hands) {
+  if (raceState.finished) {
+    playerControl.handActive = false;
+    playerControl.speed = 0;
+    playerControl.targetSpeed = 0;
+    playerControl.steer = 0;
+    playerControl.targetSteer = 0;
+    setHandStatus("winner");
+    return null;
+  }
+
+  if (raceState.phase !== "racing") {
+    playerControl.handActive = false;
+    playerControl.speed = 0;
+    playerControl.targetSpeed = 0;
+    playerControl.steer = 0;
+    playerControl.targetSteer = 0;
+    setHandStatus(raceState.phase === "countdown" ? "starting" : "waiting for race start");
+    return null;
+  }
+
+  const throttle = updateThrottleFromHands(hands);
+  const steering = updateSteeringFromHands(hands);
+
+  if (!throttle.available) {
+    playerControl.handActive = false;
+    playerControl.speed = 0;
+    playerControl.targetSpeed = 0;
+    playerControl.steer = 0;
+    playerControl.targetSteer = 0;
+    setHandStatus(throttle.message);
+    return { throttle, steering };
+  }
+
+  playerControl.handActive = true;
+  playerControl.targetSpeed = THREE.MathUtils.lerp(playerControl.targetSpeed, throttle.speed, handControlGuide.targetSpeedSmoothing);
+
+  if (!steering.available) {
+    playerControl.targetSteer = 0;
+    setHandStatus(steering.message);
+    return { throttle, steering };
+  }
+
+  playerControl.targetSteer = THREE.MathUtils.lerp(playerControl.targetSteer, steering.steer, 0.38);
+
+  setHandStatus(`driving - ${throttle.throttleText} - ${steering.steeringText}`);
+  return { throttle, steering };
+}
+
+function getWebcamErrorState(error) {
+  if (error?.name === "NotAllowedError" || error?.name === "SecurityError") {
+    return "denied";
+  }
+
+  if (error?.name === "NotFoundError" || error?.name === "DevicesNotFoundError") {
+    return "no-camera";
+  }
+
+  if (error?.name === "NotReadableError" || error?.name === "TrackStartError") {
+    return "busy";
+  }
+
+  if (error?.name === "TypeError" || error?.name === "OverconstrainedError") {
+    return "unavailable";
+  }
+
+  return "error";
+}
+
+function showWebcamOnTrackScreen() {
+  if (!webcamScreen || !webcamVideo.srcObject) return;
+
+  webcamTexture?.dispose();
+  webcamTexture = new THREE.VideoTexture(webcamVideo);
+  webcamTexture.colorSpace = THREE.SRGBColorSpace;
+  webcamTexture.minFilter = THREE.LinearFilter;
+  webcamTexture.magFilter = THREE.LinearFilter;
+  webcamScreen.material = new THREE.MeshBasicMaterial({
+    map: webcamTexture,
+    side: THREE.FrontSide,
+    toneMapped: false,
+  });
+}
+
+function resetTrackScreen() {
+  if (!webcamScreen) return;
+
+  webcamTexture?.dispose();
+  webcamTexture = null;
+  webcamScreen.material = standbyScreenMaterial;
+}
+
+async function ensureHandLandmarker() {
+  if (handLandmarker) return handLandmarker;
+
+  visionFileset ??= await FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm");
+
+  handLandmarker = await HandLandmarker.createFromOptions(visionFileset, {
+    baseOptions: {
+      modelAssetPath:
+        "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
+      delegate: "GPU",
+    },
+    runningMode: "VIDEO",
+    numHands: 2,
+    minHandDetectionConfidence: 0.55,
+    minHandPresenceConfidence: 0.55,
+    minTrackingConfidence: 0.55,
+  });
+
+  return handLandmarker;
+}
+
+function resizeHandOverlay() {
+  const width = webcamVideo.videoWidth || webcamVideo.clientWidth;
+  const height = webcamVideo.videoHeight || webcamVideo.clientHeight;
+  if (!width || !height) return false;
+
+  if (handOverlay.width !== width || handOverlay.height !== height) {
+    handOverlay.width = width;
+    handOverlay.height = height;
+  }
+
+  return true;
+}
+
+function clearHandOverlay() {
+  handOverlayContext.clearRect(0, 0, handOverlay.width, handOverlay.height);
+}
+
+function drawControlResults(handResults) {
+  if (!resizeHandOverlay()) return;
+
+  clearHandOverlay();
+  const { width, height } = handOverlay;
+  const hands = handResults.landmarks ?? [];
+  updatePlayerControls(hands);
+
+  handOverlayContext.save();
+  handOverlayContext.scale(-1, 1);
+  handOverlayContext.translate(-width, 0);
+  handOverlayContext.lineCap = "round";
+
+  hands.forEach((landmarks) => {
+    handOverlayContext.strokeStyle = "rgba(215, 248, 110, 0.62)";
+    handOverlayContext.lineWidth = Math.max(1.4, width * 0.003);
+    handConnections.forEach(([start, end]) => {
+      const from = landmarks[start];
+      const to = landmarks[end];
+      handOverlayContext.beginPath();
+      handOverlayContext.moveTo(from.x * width, from.y * height);
+      handOverlayContext.lineTo(to.x * width, to.y * height);
+      handOverlayContext.stroke();
+    });
+
+    landmarks.forEach((landmark, index) => {
+      handOverlayContext.fillStyle = index === 0 ? "rgba(255, 255, 255, 0.9)" : "rgba(255, 207, 56, 0.9)";
+      handOverlayContext.beginPath();
+      handOverlayContext.arc(landmark.x * width, landmark.y * height, index === 0 ? 3.5 : 2.2, 0, Math.PI * 2);
+      handOverlayContext.fill();
+    });
+  });
+
+  handOverlayContext.restore();
+}
+
+function runHandTracking() {
+  if (!webcamStream || !handLandmarker) return;
+
+  if (webcamVideo.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA && webcamVideo.currentTime !== lastHandVideoTime) {
+    lastHandVideoTime = webcamVideo.currentTime;
+    const timestamp = performance.now();
+    const handResults = handLandmarker.detectForVideo(webcamVideo, timestamp);
+    drawControlResults(handResults);
+  }
+
+  handTrackingFrame = requestAnimationFrame(runHandTracking);
+}
+
+function stopHandTracking() {
+  if (handTrackingFrame) {
+    cancelAnimationFrame(handTrackingFrame);
+    handTrackingFrame = null;
+  }
+  lastHandVideoTime = -1;
+  clearHandOverlay();
+  playerControl.handActive = false;
+  playerControl.speed = 0;
+  playerControl.targetSpeed = 0;
+  setHandStatus("off");
+}
+
+async function startWebcam() {
+  if (!navigator.mediaDevices?.getUserMedia) {
+    setWebcamState("unavailable");
+    return;
+  }
+  if (webcamStream || isWebcamStarting) return;
+
+  isWebcamStarting = true;
+  setWebcamState("loading", "Waiting for camera permission...");
+  setHandStatus("waiting");
+
+  try {
+    webcamStream = await navigator.mediaDevices.getUserMedia({
+      audio: false,
+      video: {
+        facingMode: "user",
+        width: { ideal: 1280 },
+        height: { ideal: 720 },
+      },
+    });
+
+    webcamVideo.srcObject = webcamStream;
+    await webcamVideo.play();
+    showWebcamOnTrackScreen();
+    setWebcamState("loading", "Loading hand tracker...");
+    setHandStatus("loading model");
+
+    try {
+      await ensureHandLandmarker();
+      setHandStatus("0 detected");
+      runHandTracking();
+    } catch (error) {
+      console.warn("Hand tracking failed:", error);
+      setHandStatus("tracker unavailable");
+    }
+
+    setWebcamState("live");
+  } catch (error) {
+    console.warn("Webcam access failed:", error);
+    stopWebcam({ preserveState: true });
+    setWebcamState(getWebcamErrorState(error));
+  } finally {
+    isWebcamStarting = false;
+  }
+}
+
+function stopWebcam(options = {}) {
+  webcamStream?.getTracks().forEach((track) => track.stop());
+  webcamStream = null;
+  webcamVideo.srcObject = null;
+  resetTrackScreen();
+  stopHandTracking();
+  if (!options.preserveState) {
+    setWebcamState("idle");
+  }
+}
+
+webcamStartButton?.addEventListener("click", startWebcam);
+webcamStopButton?.addEventListener("click", stopWebcam);
+window.addEventListener("beforeunload", stopWebcam);
+setWebcamState("idle");
+if (raceState.phase === "menu") {
+  void startWebcam();
+}
+
+let cameraMode = "map";
+function setCameraMode(mode) {
+  cameraMode = mode;
+  document.querySelectorAll("[data-camera]").forEach((item) => {
+    const isActive = item.dataset.camera === mode;
+    item.classList.toggle("active", isActive);
+    item.setAttribute("aria-pressed", String(isActive));
+  });
+  controls.enabled = cameraMode === "map" && raceState.phase === "menu";
+}
+
+document.querySelectorAll("[data-camera]").forEach((button) => {
+  button.addEventListener("click", () => {
+    if (raceState.phase !== "menu") return;
+    setCameraMode(button.dataset.camera);
+  });
+});
+raceModeButtons.forEach((button) => {
+  button.addEventListener("click", () => {
+    if (button.dataset.menuMode === "multiplayer") {
+      showMultiplayerConfig();
+      return;
+    }
+    beginCountdown(button.dataset.menuMode);
+  });
+});
+multiplayerConfigForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+});
+createRoomButton.addEventListener("click", createMultiplayerRoom);
+showJoinRoomButton.addEventListener("click", showJoinRoom);
+joinRoomButton.addEventListener("click", joinMultiplayerRoom);
+readyToggleButton.addEventListener("click", toggleReady);
+startMultiplayerButton.addEventListener("click", startConfiguredMultiplayer);
+multiplayerBackButton.addEventListener("click", handleMultiplayerBack);
+multiplayerRoomChannel?.addEventListener("message", syncCurrentRoom);
+window.addEventListener("storage", (event) => {
+  if (event.key === multiplayerStorageKey) {
+    syncCurrentRoom();
+  }
+});
+renderer.domElement.addEventListener("pointermove", updateHoveredCar);
+renderer.domElement.addEventListener("pointerleave", () => setHoveredCar(null));
+
+function updateCamera(t) {
+  const carPosition = playerCar.position.clone();
+  const heading = new THREE.Vector3(Math.sin(playerControl.heading), 0, Math.cos(playerControl.heading)).normalize();
+  const behind = carPosition.clone().addScaledVector(heading, -22);
+
+  if (cameraMode === "chase") {
+    camera.position.lerp(new THREE.Vector3(behind.x, 13, behind.z).add(new THREE.Vector3(0, 0, 0)), 0.075);
+    controls.target.lerp(carPosition.clone().add(new THREE.Vector3(0, 2.3, 0)), 0.12);
+  } else if (cameraMode === "cinematic") {
+    const orbit = new THREE.Vector3(Math.sin(t * Math.PI * 2) * 86, 48, Math.cos(t * Math.PI * 2) * 86);
+    camera.position.lerp(orbit, 0.018);
+    controls.target.lerp(new THREE.Vector3(0, 0, 0), 0.025);
+  } else {
+    camera.position.lerp(new THREE.Vector3(0, 265, 0.1), 0.08);
+    controls.target.lerp(new THREE.Vector3(0, 0, 0), 0.08);
+  }
+}
+
+function animate() {
+  const delta = Math.min(clock.getDelta(), 0.05);
+  const raceNow = getRaceClockTime();
+
+  if (raceState.phase === "countdown") {
+    raceState.countdownRemaining = Math.max(0, raceState.countdownDuration - (raceNow - raceState.countdownStartTime));
+    if (raceState.countdownRemaining <= 0) {
+      startRace(raceNow);
+    } else {
+      updateGameUi();
+    }
+  }
+
+  if (raceState.started && !raceState.finished) {
+    raceState.elapsed = raceNow - raceState.startTime;
+  }
+
+  if (raceState.phase === "racing" && playerControl.handActive) {
+    playerControl.speed = THREE.MathUtils.lerp(playerControl.speed, playerControl.targetSpeed, handControlGuide.speedSmoothing);
+    playerControl.steer = THREE.MathUtils.lerp(playerControl.steer, playerControl.targetSteer, 0.26);
+    playerControl.heading += playerControl.steer * delta * 1.9;
+    playerControl.position.x += Math.sin(playerControl.heading) * playerControl.speed * delta;
+    playerControl.position.z += Math.cos(playerControl.heading) * playerControl.speed * delta;
+    keepPlayerOnTrack();
+    placePlayerCar();
+    updateLocalMultiplayerCarState();
+    updateCheckpointProgress(delta);
+  } else if (raceState.phase === "racing" && raceState.mode === "multiplayer") {
+    updateLocalMultiplayerCarState();
+  }
+
+  updateOpponentVisibility();
+  if (raceState.phase === "racing" && raceState.mode !== "multiplayer") {
+    placeCar(rivalCar, (startLineProgress + raceState.elapsed * 0.031) % 1, startingGrid.rivalLane);
+    placeCar(paceCar, (startLineProgress + raceState.elapsed * 0.023) % 1, startingGrid.paceLane);
+  } else if (raceState.phase !== "racing") {
+    placeStartingGrid();
+  }
+
+  updateCamera(playerControl.progress);
+  updateRaceHud();
+  controls.update();
+  updateCarHoverLabel();
+  updateCarNameLabels();
+  renderer.render(scene, camera);
+  requestAnimationFrame(animate);
+}
+
+window.addEventListener("resize", () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  updateCarHoverLabel();
+  updateCarNameLabels();
+});
+
+setCameraMode("map");
+animate();

@@ -1,0 +1,10 @@
+[     331ms] [WARNING] Webcam access failed: NotAllowedError: Permission denied @ http://127.0.0.1:5173/src/main.js?t=1780377081422:1309
+[  354945ms] ReferenceError: spawnProgress is not defined
+    at resetPlayerAtStart (http://127.0.0.1:5173/src/main.js?t=1780377454197:741:28)
+    at http://127.0.0.1:5173/src/main.js?t=1780377454197:894:1
+[  363550ms] ReferenceError: spawnProgress is not defined
+    at resetPlayerAtStart (http://127.0.0.1:5173/src/main.js?t=1780377463056:758:28)
+    at http://127.0.0.1:5173/src/main.js?t=1780377463056:911:1
+[  370778ms] [WARNING] Webcam access failed: NotAllowedError: Permission denied @ http://127.0.0.1:5173/src/main.js?t=1780377470024:1325
+[  387113ms] [WARNING] Webcam access failed: NotAllowedError: Permission denied @ http://127.0.0.1:5173/src/main.js?t=1780377486396:1325
+[  405204ms] [WARNING] Webcam access failed: NotAllowedError: Permission denied @ http://127.0.0.1:5173/src/main.js?t=1780377504454:1325

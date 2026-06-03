@@ -1,0 +1,43 @@
+- main [ref=e2]:
+  - region "Race start" [ref=e4]:
+    - generic [ref=e5]:
+      - paragraph [ref=e6]: Ridgeway Arena
+      - heading "Race Track" [level=2] [ref=e7]
+      - generic "Race setup" [ref=e8]:
+        - generic [ref=e9]:
+          - strong [ref=e10]: "3"
+          - text: laps
+        - generic [ref=e11]:
+          - strong [ref=e12]: "2"
+          - text: checkpoints
+        - generic [ref=e13]:
+          - strong [ref=e14]: Chase
+          - text: camera
+      - button "Start Race" [ref=e15] [cursor=pointer]
+  - region "Map controls" [ref=e16]:
+    - generic [ref=e17]:
+      - paragraph [ref=e18]: Ridgeway Arena
+      - heading "Race Track" [level=1] [ref=e19]
+    - group "Camera mode" [ref=e20]:
+      - button "Chase" [ref=e21] [cursor=pointer]
+      - button "Map" [pressed] [ref=e22] [cursor=pointer]
+      - button "Cine" [ref=e23] [cursor=pointer]
+    - generic "Track stats" [ref=e24]:
+      - generic [ref=e25]:
+        - strong [ref=e26]: "3"
+        - text: laps left
+      - generic [ref=e27]:
+        - strong [ref=e28]: 0:00.0
+        - text: timer
+      - generic [ref=e29]:
+        - strong [ref=e30]: Ready
+        - text: checkpoint
+  - region "Webcam preview" [ref=e31]:
+    - generic [ref=e32]:
+      - paragraph [ref=e33]: Driver Cam
+      - status [ref=e34]: "Off"
+    - paragraph [ref=e37]: Ready
+    - paragraph [ref=e38]: "Controls: off"
+    - generic [ref=e39]:
+      - button "Start" [ref=e40] [cursor=pointer]
+      - button "Stop" [disabled] [ref=e41]

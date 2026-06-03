@@ -1,0 +1,11 @@
+[     353ms] [WARNING] Webcam access failed: NotAllowedError: Permission denied @ http://127.0.0.1:5173/src/main.js?t=1780390512407:1480
+[   35484ms] TypeError: Cannot read properties of null (reading 'addEventListener')
+    at http://127.0.0.1:5173/src/main.js?t=1780390512407:1541:17
+[   35485ms] [WARNING] Webcam access failed: NotAllowedError: Permission denied @ http://127.0.0.1:5173/src/main.js?t=1780390512407:1480
+[   55222ms] ReferenceError: mockReadyButton is not defined
+    at http://127.0.0.1:5173/src/main.js?t=1780390586913:1537:1
+[   55227ms] [WARNING] Webcam access failed: NotAllowedError: Permission denied @ http://127.0.0.1:5173/src/main.js?t=1780390586913:1476
+[   72969ms] ReferenceError: mockReadyButton is not defined
+    at http://127.0.0.1:5173/src/main.js?t=1780390604656:1513:1
+[   72976ms] [WARNING] Webcam access failed: NotAllowedError: Permission denied @ http://127.0.0.1:5173/src/main.js?t=1780390604656:1452
+[   87884ms] [WARNING] Webcam access failed: NotAllowedError: Permission denied @ http://127.0.0.1:5173/src/main.js?t=1780390619427:1452

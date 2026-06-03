@@ -1,0 +1,3 @@
+- main [ref=e2]:
+  - region "Race start" [ref=e4]:
+    - button "Start Race" [ref=e6] [cursor=pointer]

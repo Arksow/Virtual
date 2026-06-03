@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Ridgeway Arena Track</title>
+  </head>
+  <body>
+    <main id="app">
+      <canvas id="scene"></canvas>
+      <section id="game-menu" class="game-menu" data-state="menu" aria-label="Race start">
+        <div class="game-menu-card">
+          <div class="menu-actions">
+            <button class="race-start-button" type="button" data-menu-mode="singleplayer">Singleplayer</button>
+            <button class="race-start-button secondary" type="button" data-menu-mode="multiplayer">Multiplayer</button>
+          </div>
+          <form id="multiplayer-config" class="multiplayer-config" aria-label="Multiplayer setup">
+            <p id="multiplayer-message" class="multiplayer-message" role="status"></p>
+            <label id="player-name-field">
+              Player name
+              <input id="player-name" name="playerName" type="text" maxlength="18" value="Player 1" autocomplete="off" />
+            </label>
+            <div class="multiplayer-actions">
+              <button id="create-room" class="race-start-button" type="button">Create Room</button>
+              <button id="show-join-room" class="race-start-button secondary" type="button">Join Room</button>
+            </div>
+            <label id="join-room-field" class="join-room-field">
+              Room code
+              <input id="room-code" name="roomCode" type="text" maxlength="12" autocomplete="off" />
+            </label>
+            <button id="join-room" class="race-start-button join-room-field" type="button">Join Room</button>
+            <div id="room-lobby" class="room-lobby" aria-label="Room lobby">
+              <div class="room-code-display">
+                <span>Room code</span>
+                <strong id="active-room-code">----</strong>
+              </div>
+              <p id="leader-waiting" class="leader-waiting">Waiting for other players.</p>
+              <div>
+                <p class="lobby-title">Players</p>
+                <ul id="room-player-list" class="room-player-list"></ul>
+              </div>
+              <button id="ready-toggle" class="race-start-button secondary" type="button">Ready</button>
+              <button id="start-multiplayer" class="race-start-button" type="button" disabled>Start Race</button>
+            </div>
+            <button id="multiplayer-back" class="race-start-button secondary" type="button">Back</button>
+          </form>
+          <p id="countdown-label" class="countdown-label" aria-live="polite">5</p>
+        </div>
+      </section>
+      <p id="car-hover-label" class="car-hover-label" aria-hidden="true"></p>
+      <section class="hud" aria-label="Map controls">
+        <div class="stats" aria-label="Track stats">
+          <span><strong id="laps-left">3</strong> laps left</span>
+          <span><strong id="race-timer">0:00.0</strong> timer</span>
+        </div>
+      </section>
+      <p id="checkpoint-feedback" class="checkpoint-feedback" aria-live="polite"></p>
+      <section class="webcam-panel" aria-label="Webcam preview">
+        <div class="webcam-header">
+          <p class="eyebrow">Driver Cam</p>
+          <span id="webcam-status" role="status">Off</span>
+        </div>
+        <div class="webcam-frame">
+          <video id="webcam-video" autoplay muted playsinline></video>
+          <canvas id="hand-overlay" aria-hidden="true"></canvas>
+          <p id="webcam-message" class="webcam-message">Ready</p>
+        </div>
+        <p id="hand-status" class="hand-status">Controls: off</p>
+      </section>
+    </main>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
