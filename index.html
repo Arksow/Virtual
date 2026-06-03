@@ -47,13 +47,29 @@
           <p id="countdown-label" class="countdown-label" aria-live="polite">5</p>
         </div>
       </section>
+      <section id="ending-screen" class="ending-screen" aria-label="Race results" hidden>
+        <div class="ending-panel">
+          <p class="ending-eyebrow">Race complete</p>
+          <h1 id="ending-title">Results</h1>
+          <ol id="results-list" class="results-list"></ol>
+          <div class="ending-actions">
+            <button id="results-main-menu" class="race-start-button secondary" type="button">Main Menu</button>
+            <button id="results-return" class="race-start-button" type="button">Return</button>
+          </div>
+        </div>
+      </section>
       <p id="car-hover-label" class="car-hover-label" aria-hidden="true"></p>
       <section class="hud" aria-label="Map controls">
         <div class="stats" aria-label="Track stats">
-          <span><strong id="laps-left">3</strong> laps left</span>
-          <span><strong id="race-timer">0:00.0</strong> timer</span>
+          <span class="stat-card"><em id="laps-status">laps left</em><strong id="laps-left">3</strong></span>
+          <span class="stat-card"><em>timer</em><strong id="race-timer">0:00.0</strong></span>
         </div>
       </section>
+      <p id="speed-stat" class="speed-stat" aria-label="Current speed">
+        <strong id="speed-value">0</strong>
+        <span>km/h</span>
+      </p>
+      <p id="current-place-stat" class="current-place-stat" hidden><strong id="current-place">1st</strong></p>
       <p id="checkpoint-feedback" class="checkpoint-feedback" aria-live="polite"></p>
       <section class="webcam-panel" aria-label="Webcam preview">
         <div class="webcam-header">
