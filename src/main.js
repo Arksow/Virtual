@@ -7,6 +7,7 @@ const canvas = document.querySelector("#scene");
 const webcamVideo = document.querySelector("#webcam-video");
 const handOverlay = document.querySelector("#hand-overlay");
 const handOverlayContext = handOverlay.getContext("2d");
+const handCursor = document.querySelector("#hand-cursor");
 const webcamStartButton = document.querySelector("#webcam-start");
 const webcamStopButton = document.querySelector("#webcam-stop");
 const webcamStatus = document.querySelector("#webcam-status");
@@ -21,6 +22,13 @@ const speedStat = document.querySelector("#speed-stat");
 const speedValueLabel = document.querySelector("#speed-value");
 const raceTimerLabel = document.querySelector("#race-timer");
 const gameMenu = document.querySelector("#game-menu");
+const helpOpenButton = document.querySelector("#help-open");
+const helpCloseButton = document.querySelector("#help-close");
+const helpModal = document.querySelector("#help-modal");
+const pauseOpenButton = document.querySelector("#pause-open");
+const pauseResumeButton = document.querySelector("#pause-resume");
+const pauseExitButton = document.querySelector("#pause-exit");
+const pauseModal = document.querySelector("#pause-modal");
 const raceModeButtons = document.querySelectorAll("[data-menu-mode]");
 const countdownLabel = document.querySelector("#countdown-label");
 const checkpointFeedback = document.querySelector("#checkpoint-feedback");
@@ -38,6 +46,9 @@ const multiplayerMessage = document.querySelector("#multiplayer-message");
 const createRoomButton = document.querySelector("#create-room");
 const showJoinRoomButton = document.querySelector("#show-join-room");
 const joinRoomButton = document.querySelector("#join-room");
+const availableLobbyList = document.querySelector("#available-lobby-list");
+const availableLobbiesCount = document.querySelector("#available-lobbies-count");
+const refreshLobbiesButton = document.querySelector("#refresh-lobbies");
 const activeRoomCodeLabel = document.querySelector("#active-room-code");
 const roomPlayerList = document.querySelector("#room-player-list");
 const readyToggleButton = document.querySelector("#ready-toggle");
@@ -50,6 +61,8 @@ renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 0.92;
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x93b4cf);
@@ -119,6 +132,11 @@ let checkpointFeedbackTimer = null;
 let placeFeedbackTimer = null;
 let lastMultiplayerPositionSync = 0;
 let spectatorSwitchCooldown = 0;
+let handCursorX = window.innerWidth / 2;
+let handCursorY = window.innerHeight / 2;
+let handCursorPinched = false;
+let handCursorTarget = null;
+let selectedLobbyCode = "";
 const playerControl = {
   progress: 0.02,
   position: new THREE.Vector3(),
@@ -145,6 +163,7 @@ const raceState = {
   countdownDuration: 5,
   countdownStartTime: 0,
   countdownRemaining: 5,
+  pauseStartTime: 0,
   mode: "singleplayer",
   playerId: "",
   playerName: "Player 1",
@@ -158,6 +177,7 @@ const raceState = {
 const standbyScreenMaterial = new THREE.MeshBasicMaterial({ color: 0x0b1417 });
 const trackSamples = [];
 const drivableHalfWidth = 12.6;
+const playerRailClearance = 1.45;
 const checkpointRadius = 17;
 const startLineProgress = 0.02;
 const gridStartProgress = 0.985;
@@ -170,13 +190,21 @@ const startCheckpointIndex = 0;
 const checkpointMeshes = [];
 const confettiBursts = [];
 const handControlGuide = {
-  maxSpeed: 58,
+  maxSpeed: 40,
   fistThreshold: 0.62,
+  openThreshold: 0.32,
   steerDeadZone: 0.065,
   maxSteerDelta: 0.28,
   targetSpeedSmoothing: 0.1,
   speedSmoothing: 0.095,
   steerSmoothing: 0.18,
+  steerInputSmoothing: 0.18,
+  turnRate: 0.95,
+};
+const handCursorGuide = {
+  pinchDownRatio: 0.34,
+  pinchUpRatio: 0.48,
+  smoothing: 0.36,
 };
 const speedometerScale = 4;
 const singleplayerAiConfigs = [
@@ -186,6 +214,12 @@ const singleplayerAiConfigs = [
   { name: "Nova", color: 0xf064c8, trim: 0x190d16, speed: 0.023 },
   { name: "Pulse", color: 0x6de7ff, trim: 0x10202a, speed: 0.021 },
 ];
+const singleplayerAiStates = singleplayerAiConfigs.map(() => ({
+  finished: false,
+  finishTime: 0,
+  progress: 0,
+  speedMultiplier: 1,
+}));
 const formulaGridLanes = [-6.4, 6.4];
 const formulaGridRowOffset = 0.022;
 const maxMultiplayerPlayers = 5;
@@ -201,6 +235,8 @@ const carModelRotationOffset = Math.PI;
 const multiplayerStorageKey = "ridgeway-arena-multiplayer-rooms";
 const multiplayerRoomChannel =
   "BroadcastChannel" in window ? new BroadcastChannel("ridgeway-arena-multiplayer-rooms") : null;
+let multiplayerSocket = null;
+let multiplayerSocketConnected = false;
 const handConnections = [
   [0, 1],
   [1, 2],
@@ -278,11 +314,19 @@ function keepPlayerOnTrack() {
   const nearest = findNearestTrackSample(playerControl.position);
   const normal = new THREE.Vector3(-nearest.tangent.z, 0, nearest.tangent.x).normalize();
   const offset = new THREE.Vector3().subVectors(playerControl.position, nearest.point).dot(normal);
-  const clampedOffset = THREE.MathUtils.clamp(offset, -drivableHalfWidth, drivableHalfWidth);
+  const safeHalfWidth = drivableHalfWidth - playerRailClearance;
+  const clampedOffset = THREE.MathUtils.clamp(offset, -safeHalfWidth, safeHalfWidth);
 
   if (Math.abs(clampedOffset - offset) > 0.001) {
     playerControl.position.copy(nearest.point).addScaledVector(normal, clampedOffset);
-    playerControl.speed *= 0.42;
+    playerControl.speed *= 0.34;
+    playerControl.targetSpeed = Math.min(playerControl.targetSpeed, handControlGuide.maxSpeed * 0.42);
+    const trackHeading = Math.atan2(nearest.tangent.x, nearest.tangent.z);
+    const reverseTrackHeading = trackHeading + Math.PI;
+    const forwardDelta = Math.abs(Math.atan2(Math.sin(playerControl.heading - trackHeading), Math.cos(playerControl.heading - trackHeading)));
+    const railHeading = forwardDelta <= Math.PI * 0.5 ? trackHeading : reverseTrackHeading;
+    playerControl.heading = lerpAngle(playerControl.heading, railHeading, 0.32);
+    playerControl.targetSteer = 0;
   }
 
   playerControl.progress = nearest.t;
@@ -633,7 +677,7 @@ function addStandsAndProps() {
     tower.add(pole, lightBar);
 
     [-4, 0, 4].forEach((offset) => {
-      const lamp = new THREE.SpotLight(0xfff4c7, 2.4, 185, Math.PI / 5, 0.42, 1.1);
+      const lamp = new THREE.SpotLight(0xfff4c7, 1.75, 170, Math.PI / 5.5, 0.48, 1.15);
       lamp.position.set(offset, 31.6, 0);
       lamp.target.position.set(0, 0, 0);
       tower.add(lamp, lamp.target);
@@ -642,8 +686,10 @@ function addStandsAndProps() {
     tower.position.set(x, 0, z);
     tower.rotation.y = Math.atan2(-x, -z);
     tower.traverse((child) => {
-      child.castShadow = true;
-      child.receiveShadow = true;
+      if (child.isMesh) {
+        child.castShadow = true;
+        child.receiveShadow = true;
+      }
     });
     world.add(tower);
   });
@@ -897,7 +943,7 @@ function applyLocalMultiplayerIdentity() {
 
 function updateCarHoverNames() {
   const localPlayer = getLocalPlayer();
-  setCarDisplayName(playerCar, localPlayer?.name || raceState.playerName || "Player 1");
+  setCarDisplayName(playerCar, raceState.mode === "singleplayer" ? "You" : localPlayer?.name || raceState.playerName || "Player 1");
   singleplayerAiCars.forEach((car, index) => {
     setCarDisplayName(car, singleplayerAiConfigs[index].name);
   });
@@ -938,8 +984,8 @@ function updateOpponentVisibility() {
   if (showAiCars) {
     setCarPaint(playerCar, 0);
   }
-  singleplayerAiCars.forEach((car) => {
-    car.visible = showAiCars;
+  singleplayerAiCars.forEach((car, index) => {
+    car.visible = showAiCars && !(raceState.phase === "racing" && singleplayerAiStates[index].finished);
   });
   remotePlayerCars.forEach((car, playerId) => {
     const player = raceState.players.find((item) => item.id === playerId);
@@ -964,6 +1010,7 @@ function renderRemotePlayerCars() {
   if (raceState.mode !== "multiplayer") {
     remotePlayerCars.forEach((car) => {
       car.visible = false;
+      car.userData.hasPose = false;
     });
     return;
   }
@@ -974,6 +1021,7 @@ function renderRemotePlayerCars() {
   remotePlayerCars.forEach((car, playerId) => {
     if (!activeRemoteIds.has(playerId)) {
       car.visible = false;
+      car.userData.hasPose = false;
     }
   });
 
@@ -1026,13 +1074,18 @@ function updateCarHoverLabel() {
   const labelPosition = hoveredCar.position.clone();
   labelPosition.y += 5.2;
   labelPosition.project(camera);
+  if (labelPosition.z < -1 || labelPosition.z > 1) {
+    carHoverLabel.classList.remove("is-visible");
+    return;
+  }
+  carHoverLabel.classList.add("is-visible");
   carHoverLabel.style.left = `${((labelPosition.x + 1) / 2) * window.innerWidth}px`;
   carHoverLabel.style.top = `${((-labelPosition.y + 1) / 2) * window.innerHeight}px`;
 }
 
 function updateCarNameLabel(car, visible) {
   const label = ensureCarNameLabel(car);
-  const shouldShow = visible && car.visible && raceState.mode === "multiplayer";
+  const shouldShow = visible && car.visible;
   label.classList.toggle("is-hidden", !shouldShow);
   if (!shouldShow) return;
 
@@ -1040,12 +1093,16 @@ function updateCarNameLabel(car, visible) {
   const labelPosition = car.position.clone();
   labelPosition.y += 6.3;
   labelPosition.project(camera);
+  if (labelPosition.z < -1 || labelPosition.z > 1) {
+    label.classList.add("is-hidden");
+    return;
+  }
   label.style.left = `${((labelPosition.x + 1) / 2) * window.innerWidth}px`;
   label.style.top = `${((-labelPosition.y + 1) / 2) * window.innerHeight}px`;
 }
 
 function updateCarNameLabels() {
-  updateCarNameLabel(playerCar, false);
+  updateCarNameLabel(playerCar, raceState.mode === "singleplayer");
   singleplayerAiCars.forEach((car) => {
     updateCarNameLabel(car, false);
   });
@@ -1094,10 +1151,12 @@ function placeStartingGrid() {
 }
 
 function addLighting() {
-  const sun = new THREE.DirectionalLight(0xffffff, 2.4);
+  const sun = new THREE.DirectionalLight(0xffffff, 2.05);
   sun.position.set(-72, 110, 64);
   sun.castShadow = true;
   sun.shadow.mapSize.set(2048, 2048);
+  sun.shadow.bias = -0.00018;
+  sun.shadow.normalBias = 0.035;
   sun.shadow.camera.near = 10;
   sun.shadow.camera.far = 260;
   sun.shadow.camera.left = -150;
@@ -1106,7 +1165,7 @@ function addLighting() {
   sun.shadow.camera.bottom = -150;
   scene.add(sun);
 
-  scene.add(new THREE.HemisphereLight(0xcfe8ff, 0x274722, 1.4));
+  scene.add(new THREE.HemisphereLight(0xcfe8ff, 0x274722, 1.15));
 
   const lampMaterial = new THREE.MeshStandardMaterial({ color: 0x35383a, roughness: 0.5 });
   for (let i = 0; i < 14; i += 1) {
@@ -1119,9 +1178,10 @@ function addLighting() {
     const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.28, 12, 10), lampMaterial);
     pole.position.set(point.x, 6, point.z);
     pole.castShadow = true;
+    pole.receiveShadow = true;
     world.add(pole);
 
-    const head = new THREE.PointLight(0xfff3be, 0.75, 28);
+    const head = new THREE.PointLight(0xfff3be, 0.45, 24);
     head.position.set(point.x, 12.2, point.z);
     world.add(head);
   }
@@ -1144,11 +1204,16 @@ function getPlayerColorHex(playerIndex) {
 
 function getSingleplayerResults() {
   const playerTime = raceState.finishTime || raceState.elapsed;
-  const aiResults = singleplayerAiConfigs.map((config) => ({
-    name: config.name,
-    time: raceState.totalLaps / config.speed,
-  }));
-  return [{ name: "Player", time: playerTime }, ...aiResults].sort((a, b) => a.time - b.time);
+  const aiResults = singleplayerAiConfigs.map((config, index) => {
+    const state = singleplayerAiStates[index];
+    const remainingProgress = Math.max(raceState.totalLaps - (state?.progress ?? 0), 0);
+    const currentMultiplier = Math.max(state?.speedMultiplier ?? 1, 0.48);
+    return {
+      name: config.name,
+      time: state?.finishTime || raceState.elapsed + remainingProgress / (config.speed * currentMultiplier),
+    };
+  });
+  return [{ name: "You", time: playerTime }, ...aiResults].sort((a, b) => a.time - b.time);
 }
 
 function getMultiplayerResults() {
@@ -1184,6 +1249,41 @@ function getCurrentMultiplayerPlaceIndex() {
     return raceState.players.findIndex((player) => player.id === a.id) - raceState.players.findIndex((player) => player.id === b.id);
   });
   return sortedPlayers.findIndex((player) => player.id === raceState.playerId);
+}
+
+function getSingleplayerAiProgress(index) {
+  const config = singleplayerAiConfigs[index];
+  const state = singleplayerAiStates[index];
+  return Math.min(state.progress || (state.finished ? state.finishTime * config.speed : raceState.elapsed * config.speed), raceState.totalLaps);
+}
+
+function getCurrentSingleplayerPlaceIndex() {
+  if (raceState.mode !== "singleplayer") return -1;
+  const racers = [
+    {
+      id: "player",
+      finished: raceState.finished,
+      finishTime: raceState.finishTime || Infinity,
+      progress: raceState.lapsCompleted + getProgressSinceStart(playerControl.progress),
+    },
+    ...singleplayerAiConfigs.map((config, index) => ({
+      id: `ai-${index}`,
+      finished: singleplayerAiStates[index].finished,
+      finishTime: singleplayerAiStates[index].finishTime || Infinity,
+      progress: getSingleplayerAiProgress(index),
+    })),
+  ];
+  const sortedRacers = racers.sort((a, b) => {
+    if (a.finished && b.finished) return a.finishTime - b.finishTime;
+    if (a.finished) return -1;
+    if (b.finished) return 1;
+    return b.progress - a.progress;
+  });
+  return sortedRacers.findIndex((racer) => racer.id === "player");
+}
+
+function getCurrentPlaceIndex() {
+  return raceState.mode === "multiplayer" ? getCurrentMultiplayerPlaceIndex() : getCurrentSingleplayerPlaceIndex();
 }
 
 function clearPlaceFeedback() {
@@ -1243,6 +1343,7 @@ function showEndingScreen(results, mode) {
   renderResults(results, mode);
   resultsReturnButton.hidden = mode !== "multiplayer";
   endingScreen.hidden = false;
+  pauseModal.hidden = true;
   raceState.phase = "finished";
   raceState.started = false;
   raceState.finished = true;
@@ -1254,6 +1355,46 @@ function showEndingScreen(results, mode) {
 
 function hideEndingScreen() {
   endingScreen.hidden = true;
+}
+
+function showHelpModal() {
+  helpModal.hidden = false;
+}
+
+function hideHelpModal() {
+  helpModal.hidden = true;
+}
+
+function showPauseMenu() {
+  if (raceState.mode !== "singleplayer" || raceState.phase !== "racing") return;
+
+  raceState.phase = "paused";
+  raceState.pauseStartTime = getRaceClockTime();
+  playerControl.handActive = false;
+  playerControl.targetSpeed = 0;
+  playerControl.targetSteer = 0;
+  pauseModal.hidden = false;
+  updateGameUi();
+  updateCheckpointVisibility();
+  updateRaceHud();
+}
+
+function resumePausedRace() {
+  if (raceState.phase !== "paused") return;
+
+  const pausedDuration = getRaceClockTime() - raceState.pauseStartTime;
+  raceState.startTime += Math.max(pausedDuration, 0);
+  raceState.pauseStartTime = 0;
+  raceState.phase = "racing";
+  pauseModal.hidden = true;
+  updateGameUi();
+  updateCheckpointVisibility();
+  updateRaceHud();
+}
+
+function exitPausedRace() {
+  pauseModal.hidden = true;
+  showMainMenu();
 }
 
 function returnToMultiplayerLobby() {
@@ -1307,8 +1448,15 @@ function resetRaceState() {
   raceState.finishTime = 0;
   raceState.checkpointCooldown = 0.75;
   raceState.countdownRemaining = raceState.countdownDuration;
+  raceState.pauseStartTime = 0;
   raceState.spectatingPlayerId = "";
   raceState.currentPlaceIndex = -1;
+  singleplayerAiStates.forEach((state) => {
+    state.finished = false;
+    state.finishTime = 0;
+    state.progress = 0;
+    state.speedMultiplier = 1;
+  });
   clearPlaceFeedback();
   spectatorSwitchCooldown = 0;
   playerCar.visible = true;
@@ -1336,7 +1484,7 @@ function updateCheckpointVisibility() {
 function updateRaceHud() {
   const lapsLeft = Math.max(raceState.totalLaps - raceState.lapsCompleted, 0);
   const isCompleted = raceState.finished && raceState.mode === "multiplayer";
-  const placeIndex = getCurrentMultiplayerPlaceIndex();
+  const placeIndex = getCurrentPlaceIndex();
   const speedRatio = THREE.MathUtils.clamp(Math.abs(playerControl.speed) / handControlGuide.maxSpeed, 0, 1);
   const speedKmh = Math.round(Math.abs(playerControl.speed) * speedometerScale);
   const speedHue = THREE.MathUtils.lerp(78, 0, Math.pow(speedRatio, 1.7));
@@ -1346,9 +1494,9 @@ function updateRaceHud() {
   speedValueLabel.textContent = String(speedKmh);
   speedStat.style.setProperty("--speed-color", `hsl(${speedHue} 92% 58%)`);
   speedStat.style.setProperty("--speed-glow", `rgba(255, 58, 58, ${speedGlow})`);
-  currentPlaceStat.hidden = raceState.mode !== "multiplayer";
+  currentPlaceStat.hidden = raceState.phase !== "racing";
   currentPlaceLabel.textContent = placeIndex === -1 ? "-" : formatPlacement(placeIndex);
-  if (raceState.mode === "multiplayer" && raceState.phase === "racing") {
+  if (raceState.phase === "racing") {
     updatePlaceFeedback(placeIndex);
   } else {
     raceState.currentPlaceIndex = placeIndex;
@@ -1520,6 +1668,8 @@ function finishMultiplayerRace() {
 
 function beginCountdown(mode = "singleplayer") {
   hideEndingScreen();
+  hideHelpModal();
+  pauseModal.hidden = true;
   resetRaceState();
   raceState.mode = mode;
   raceState.phase = "countdown";
@@ -1537,6 +1687,7 @@ function beginCountdown(mode = "singleplayer") {
 
 function beginSharedMultiplayerCountdown(startedAt) {
   if (raceState.phase === "countdown" || raceState.phase === "racing") return;
+  pauseModal.hidden = true;
   resetRaceState();
   raceState.mode = "multiplayer";
   raceState.phase = "countdown";
@@ -1555,6 +1706,8 @@ function beginSharedMultiplayerCountdown(startedAt) {
 
 function showMultiplayerConfig() {
   hideEndingScreen();
+  hideHelpModal();
+  pauseModal.hidden = true;
   raceState.mode = "multiplayer";
   raceState.phase = "multiplayer-config";
   resetRaceState();
@@ -1575,6 +1728,8 @@ function showMultiplayerConfig() {
 function showMainMenu() {
   leaveLobbyIfNeeded();
   hideEndingScreen();
+  hideHelpModal();
+  pauseModal.hidden = true;
   raceState.mode = "singleplayer";
   raceState.phase = "menu";
   resetRaceState();
@@ -1609,9 +1764,21 @@ function getStoredRooms() {
   }
 }
 
+function sendMultiplayerMessage(message) {
+  if (!multiplayerSocketConnected || multiplayerSocket?.readyState !== WebSocket.OPEN) return false;
+  multiplayerSocket.send(JSON.stringify(message));
+  return true;
+}
+
+function registerMultiplayerSession() {
+  if (!raceState.roomCode || !raceState.playerId || raceState.mode !== "multiplayer") return;
+  sendMultiplayerMessage({ type: "registerPlayer", roomCode: raceState.roomCode, playerId: raceState.playerId });
+}
+
 function saveStoredRooms(rooms) {
   localStorage.setItem(multiplayerStorageKey, JSON.stringify(rooms));
   multiplayerRoomChannel?.postMessage({ type: "rooms-updated" });
+  sendMultiplayerMessage({ type: "saveRooms", rooms });
 }
 
 function getStoredRoom(roomCode = raceState.roomCode) {
@@ -1661,6 +1828,9 @@ function updateStoredRoom(roomCode, updater) {
 
 function leaveCurrentMultiplayerRoom() {
   if (!raceState.roomCode || !raceState.playerId || raceState.mode !== "multiplayer") return;
+  if (sendMultiplayerMessage({ type: "leaveRoom", roomCode: raceState.roomCode, playerId: raceState.playerId })) {
+    return;
+  }
   const rooms = getStoredRooms();
   const room = rooms[raceState.roomCode];
   if (!room) return;
@@ -1685,6 +1855,9 @@ function leaveLobbyIfNeeded() {
 }
 
 function syncCurrentRoom() {
+  if (raceState.mode === "multiplayer" && multiplayerConfigForm.dataset.step === "join") {
+    renderAvailableLobbies();
+  }
   const isActiveRoomView =
     multiplayerConfigForm.dataset.step === "lobby" || raceState.phase === "countdown" || raceState.phase === "racing";
   if (!raceState.roomCode || raceState.mode !== "multiplayer" || !isActiveRoomView) return;
@@ -1741,6 +1914,67 @@ function renderRoomLobby() {
   startMultiplayerButton.disabled = !raceState.isLeader || !allOtherPlayersReady;
 }
 
+function getJoinableLobbyEntries() {
+  const rooms = getStoredRooms();
+  return Object.values(rooms)
+    .map((room) => ({
+      ...room,
+      players: normalizeRoomPlayers(room.players ?? []),
+    }))
+    .filter((room) => !room.started)
+    .sort((a, b) => a.code.localeCompare(b.code));
+}
+
+function selectLobby(roomCode) {
+  selectedLobbyCode = roomCode;
+  roomCodeInput.value = roomCode;
+  multiplayerMessage.classList.remove("is-visible");
+  renderAvailableLobbies();
+}
+
+function renderAvailableLobbies() {
+  if (!availableLobbyList) return;
+
+  const lobbies = getJoinableLobbyEntries();
+  if (selectedLobbyCode && !lobbies.some((room) => room.code === selectedLobbyCode)) {
+    selectedLobbyCode = "";
+  }
+
+  availableLobbiesCount.textContent = `${lobbies.length} ${lobbies.length === 1 ? "room" : "rooms"}`;
+  availableLobbyList.innerHTML = "";
+
+  if (!lobbies.length) {
+    const emptyState = document.createElement("p");
+    emptyState.className = "available-lobby-empty";
+    emptyState.textContent = "No open lobbies.";
+    availableLobbyList.append(emptyState);
+    return;
+  }
+
+  lobbies.forEach((room) => {
+    const players = room.players ?? [];
+    const isFull = players.length >= maxMultiplayerPlayers;
+    const leader = players.find((player) => player.leader) ?? players[0];
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "available-lobby-card";
+    button.classList.toggle("is-selected", selectedLobbyCode === room.code);
+    button.classList.toggle("is-full", isFull);
+    button.dataset.roomCode = room.code;
+    const lobbyText = document.createElement("span");
+    const lobbyCode = document.createElement("strong");
+    const lobbyLeader = document.createElement("em");
+    const lobbyCount = document.createElement("b");
+    lobbyCode.textContent = room.code;
+    lobbyLeader.textContent = leader?.name ?? "Open lobby";
+    lobbyCount.textContent = `${players.length}/${maxMultiplayerPlayers}`;
+    lobbyText.append(lobbyCode, lobbyLeader);
+    button.append(lobbyText, lobbyCount);
+    button.addEventListener("click", () => selectLobby(room.code));
+    availableLobbyList.append(button);
+  });
+}
+
 function enterLobby({ roomCode, isLeader, players }) {
   raceState.roomCode = roomCode.toUpperCase();
   raceState.isLeader = isLeader;
@@ -1749,6 +1983,7 @@ function enterLobby({ roomCode, isLeader, players }) {
   roomCodeInput.value = isLeader ? "" : raceState.roomCode;
   multiplayerMessage.classList.remove("is-visible");
   multiplayerConfigForm.dataset.step = "lobby";
+  registerMultiplayerSession();
   applyLocalMultiplayerIdentity();
   renderRemotePlayerCars();
   renderRoomLobby();
@@ -1785,13 +2020,31 @@ function showJoinRoom() {
   playerNameInput.value = raceState.playerName;
   multiplayerConfigForm.dataset.step = "join";
   multiplayerMessage.classList.remove("is-visible");
+  renderAvailableLobbies();
   roomCodeInput.focus();
+}
+
+function pressRoomCodeKey(key) {
+  const currentCode = roomCodeInput.value.trim().toUpperCase();
+  selectedLobbyCode = "";
+  if (key === "backspace") {
+    roomCodeInput.value = currentCode.slice(0, -1);
+  } else if (key === "clear") {
+    roomCodeInput.value = "";
+  } else if (currentCode.length < Number(roomCodeInput.maxLength || 12)) {
+    roomCodeInput.value = `${currentCode}${key}`.slice(0, Number(roomCodeInput.maxLength || 12));
+  }
+  roomCodeInput.focus();
+  multiplayerMessage.classList.remove("is-visible");
+  renderAvailableLobbies();
 }
 
 function returnToMultiplayerChoices() {
   multiplayerConfigForm.dataset.step = "choose";
   multiplayerMessage.classList.remove("is-visible");
   roomCodeInput.value = "";
+  selectedLobbyCode = "";
+  renderAvailableLobbies();
   activeRoomCodeLabel.textContent = "----";
   roomPlayerList.innerHTML = "";
   readyToggleButton.textContent = "Ready";
@@ -1809,9 +2062,10 @@ function handleMultiplayerBack() {
 
 function joinMultiplayerRoom() {
   const playerName = raceState.playerName;
-  const roomCode = roomCodeInput.value.trim().toUpperCase();
+  const typedRoomCode = roomCodeInput.value.trim().toUpperCase();
+  const roomCode = selectedLobbyCode || typedRoomCode;
   if (!roomCode) {
-    showMultiplayerMessage("Enter a room code to join.");
+    showMultiplayerMessage("Enter a room code or select a lobby.");
     return;
   }
   if (!playerName) {
@@ -1821,13 +2075,21 @@ function joinMultiplayerRoom() {
   const room = getStoredRoom(roomCode);
   if (!room) {
     showMultiplayerMessage("Room code not found.");
+    renderAvailableLobbies();
+    return;
+  }
+  if (room.started) {
+    showMultiplayerMessage("Race already started.");
+    renderAvailableLobbies();
     return;
   }
   raceState.playerName = playerName;
   const playerId = getPlayerId();
-  const isRejoiningPlayer = room.players.some((player) => player.id === playerId);
-  if (!isRejoiningPlayer && room.players.length >= maxMultiplayerPlayers) {
+  const roomPlayers = normalizeRoomPlayers(room.players ?? []);
+  const isRejoiningPlayer = roomPlayers.some((player) => player.id === playerId);
+  if (!isRejoiningPlayer && roomPlayers.length >= maxMultiplayerPlayers) {
     showMultiplayerMessage("Lobby full.");
+    renderAvailableLobbies();
     return;
   }
   const updatedRoom = updateStoredRoom(roomCode, (currentRoom) => {
@@ -1954,12 +2216,80 @@ function updateCheckpointProgress(delta) {
   }
 }
 
+function updateSingleplayerAiCars(delta) {
+  if (raceState.mode !== "singleplayer" || raceState.phase !== "racing") return;
+
+  const playerProgress = raceState.lapsCompleted + getProgressSinceStart(playerControl.progress);
+
+  singleplayerAiCars.forEach((car, index) => {
+    const state = singleplayerAiStates[index];
+    const config = singleplayerAiConfigs[index];
+    if (state.finished) {
+      car.visible = false;
+      return;
+    }
+
+    const targetGap = THREE.MathUtils.clamp((index - 2) * 0.045, -0.1, 0.1);
+    const gapToPlayer = state.progress - playerProgress - targetGap;
+    const targetMultiplier = THREE.MathUtils.clamp(1 - gapToPlayer * 1.85, 0.48, 1.62);
+    state.speedMultiplier = THREE.MathUtils.lerp(state.speedMultiplier, targetMultiplier, 1 - Math.exp(-delta * 1.6));
+    state.progress = Math.min(state.progress + config.speed * state.speedMultiplier * delta, raceState.totalLaps);
+
+    if (state.progress >= raceState.totalLaps) {
+      state.finished = true;
+      state.finishTime = raceState.elapsed;
+      car.visible = false;
+      return;
+    }
+
+    const startPose = getSingleplayerStartPose(index + 1);
+    placeCar(car, (gridStartProgress + state.progress) % 1, startPose.lane);
+  });
+}
+
+function connectMultiplayerServer() {
+  if (!("WebSocket" in window)) return;
+
+  const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+  const socket = new WebSocket(`${protocol}//${window.location.host}/multiplayer`);
+  multiplayerSocket = socket;
+
+  socket.addEventListener("open", () => {
+    multiplayerSocketConnected = true;
+    sendMultiplayerMessage({ type: "sync" });
+    registerMultiplayerSession();
+  });
+
+  socket.addEventListener("message", (event) => {
+    try {
+      const message = JSON.parse(event.data);
+      if (message.type !== "rooms") return;
+      localStorage.setItem(multiplayerStorageKey, JSON.stringify(message.rooms ?? {}));
+      syncCurrentRoom();
+    } catch (error) {
+      console.warn("Could not sync multiplayer rooms:", error);
+    }
+  });
+
+  socket.addEventListener("close", () => {
+    multiplayerSocketConnected = false;
+    if (multiplayerSocket === socket) {
+      window.setTimeout(connectMultiplayerServer, 1800);
+    }
+  });
+
+  socket.addEventListener("error", () => {
+    multiplayerSocketConnected = false;
+  });
+}
+
 addGround();
 addTrack();
 addPitLane();
 addTrackFurniture();
 addStandsAndProps();
 addLighting();
+connectMultiplayerServer();
 updateGameUi();
 updateCheckpointVisibility();
 updateRaceHud();
@@ -2035,6 +2365,10 @@ function setHandStatus(message) {
   handStatus.textContent = `Controls: ${message}`;
 }
 
+function getLandmarkDistance(a, b) {
+  return Math.hypot(a.x - b.x, a.y - b.y);
+}
+
 function getHandCenter(landmarks) {
   return [0, 5, 9, 13, 17].reduce(
     (center, index) => {
@@ -2044,6 +2378,99 @@ function getHandCenter(landmarks) {
     },
     { x: 0, y: 0 },
   );
+}
+
+function getHandednessLabel(handResults, index) {
+  const handedness = handResults.handednesses?.[index] ?? handResults.handedness?.[index];
+  return handedness?.[0]?.categoryName ?? handedness?.[0]?.displayName ?? "";
+}
+
+function getPrimaryUiHand(handResults) {
+  const hands = handResults.landmarks ?? [];
+  if (hands.length !== 1) return null;
+
+  const trackedHands = hands
+    .map((landmarks, index) => ({
+      landmarks,
+      handedness: getHandednessLabel(handResults, index).toLowerCase(),
+      visualX: 1 - getHandCenter(landmarks).x,
+    }))
+    .filter((hand) => hand.landmarks[4] && hand.landmarks[8]);
+  const rightHand = trackedHands.find((hand) => hand.handedness === "right");
+  if (rightHand) return rightHand.landmarks;
+
+  const hasKnownLeftHand = trackedHands.some((hand) => hand.handedness === "left");
+  if (hasKnownLeftHand) return null;
+
+  return trackedHands.sort((a, b) => b.visualX - a.visualX)[0]?.landmarks;
+}
+
+function hideHandCursor() {
+  handCursor.classList.remove("is-visible", "is-pinching");
+  setHandCursorTarget(null);
+  handCursorPinched = false;
+}
+
+function getHandCursorTarget(x, y) {
+  const candidates = document.elementsFromPoint(x, y);
+  return (
+    candidates
+      .map((element) => element.closest?.("button, input"))
+      .find((element) => element && !element.disabled && element.getClientRects().length > 0) ?? null
+  );
+}
+
+function setHandCursorTarget(target) {
+  if (handCursorTarget === target) return;
+  handCursorTarget?.classList.remove("hand-hover");
+  handCursorTarget = target;
+  handCursorTarget?.classList.add("hand-hover");
+}
+
+function activateHandCursorTarget(target) {
+  if (!target) return;
+
+  if (target.tagName === "INPUT") {
+    target.focus();
+    return;
+  }
+
+  target.click();
+}
+
+function updateHandCursor(handResults) {
+  const primaryHand = getPrimaryUiHand(handResults);
+  if (!primaryHand) {
+    hideHandCursor();
+    return;
+  }
+
+  const indexTip = primaryHand[8];
+  const thumbTip = primaryHand[4];
+  const targetX = THREE.MathUtils.clamp((1 - indexTip.x) * window.innerWidth, 0, window.innerWidth);
+  const targetY = THREE.MathUtils.clamp(indexTip.y * window.innerHeight, 0, window.innerHeight);
+  handCursorX = THREE.MathUtils.lerp(handCursorX, targetX, handCursorGuide.smoothing);
+  handCursorY = THREE.MathUtils.lerp(handCursorY, targetY, handCursorGuide.smoothing);
+
+  const thumbIndexDistance = getLandmarkDistance(thumbTip, indexTip);
+  const handScale = Math.max(getLandmarkDistance(primaryHand[0], primaryHand[9]), 0.001);
+  const thumbIndexRatio = thumbIndexDistance / handScale;
+  const isPinching = handCursorPinched
+    ? thumbIndexRatio < handCursorGuide.pinchUpRatio
+    : thumbIndexRatio < handCursorGuide.pinchDownRatio;
+  const target = getHandCursorTarget(handCursorX, handCursorY);
+
+  handCursor.style.left = `${handCursorX}px`;
+  handCursor.style.top = `${handCursorY}px`;
+  handCursor.classList.add("is-visible");
+  handCursor.classList.toggle("is-pinching", isPinching);
+  setHandCursorTarget(target);
+
+  if (isPinching && !handCursorPinched) {
+    activateHandCursorTarget(target);
+  }
+
+  handCursorPinched = isPinching;
 }
 
 function getHandClosedScore(landmarks) {
@@ -2074,25 +2501,31 @@ function getTrackedHands(hands) {
 function updateThrottleFromHands(hands) {
   const trackedHands = getTrackedHands(hands);
 
-  if (!trackedHands.length) {
+  if (trackedHands.length < 2) {
     playerControl.targetSpeed = 0;
     return {
       available: false,
-      message: "show hands for speed",
+      message: "show both hands for speed",
       trackedHands,
     };
   }
 
-  const closedScore = trackedHands.reduce((sum, hand) => sum + hand.closedScore, 0) / trackedHands.length;
+  const controlHands = [trackedHands[0], trackedHands[trackedHands.length - 1]];
+  const closedScore = controlHands.reduce((sum, hand) => sum + hand.closedScore, 0) / controlHands.length;
+  const bothClenched = controlHands.every((hand) => hand.closedScore >= handControlGuide.fistThreshold);
+  const bothOpen = controlHands.every((hand) => hand.closedScore <= handControlGuide.openThreshold);
+
   let throttle = 0;
-  if (closedScore >= handControlGuide.fistThreshold) {
+  if (bothClenched) {
     throttle = (closedScore - handControlGuide.fistThreshold) / (1 - handControlGuide.fistThreshold);
   }
 
   const deadZoneThrottle = Math.abs(throttle) < 0.08 ? 0 : THREE.MathUtils.clamp(throttle, 0, 1);
   const speed = deadZoneThrottle * handControlGuide.maxSpeed;
   const throttleText =
-    deadZoneThrottle === 0
+    !bothClenched && !bothOpen
+      ? "match hands"
+      : deadZoneThrottle === 0
       ? "open slow down"
       : "fist speed up";
 
@@ -2100,6 +2533,8 @@ function updateThrottleFromHands(hands) {
     available: true,
     trackedHands,
     closedScore,
+    bothClenched,
+    bothOpen,
     throttle: deadZoneThrottle,
     speed,
     throttleText,
@@ -2176,7 +2611,7 @@ function updatePlayerControls(hands) {
     return { throttle, steering };
   }
 
-  playerControl.targetSteer = THREE.MathUtils.lerp(playerControl.targetSteer, steering.steer, 0.24);
+  playerControl.targetSteer = THREE.MathUtils.lerp(playerControl.targetSteer, steering.steer, handControlGuide.steerInputSmoothing);
 
   setHandStatus(`driving - ${throttle.throttleText} - ${steering.steeringText}`);
   return { throttle, steering };
@@ -2269,6 +2704,7 @@ function drawControlResults(handResults) {
   clearHandOverlay();
   const { width, height } = handOverlay;
   const hands = handResults.landmarks ?? [];
+  updateHandCursor(handResults);
   updatePlayerControls(hands);
 
   handOverlayContext.save();
@@ -2323,6 +2759,7 @@ function stopHandTracking() {
   playerControl.speed = 0;
   playerControl.targetSpeed = 0;
   setHandStatus("off");
+  hideHandCursor();
 }
 
 async function startWebcam() {
@@ -2425,11 +2862,38 @@ multiplayerConfigForm.addEventListener("submit", (event) => {
 createRoomButton.addEventListener("click", createMultiplayerRoom);
 showJoinRoomButton.addEventListener("click", showJoinRoom);
 joinRoomButton.addEventListener("click", joinMultiplayerRoom);
+refreshLobbiesButton.addEventListener("click", () => {
+  selectedLobbyCode = "";
+  renderAvailableLobbies();
+  sendMultiplayerMessage({ type: "sync" });
+});
+roomCodeInput.addEventListener("input", () => {
+  roomCodeInput.value = roomCodeInput.value.toUpperCase();
+  selectedLobbyCode = "";
+  multiplayerMessage.classList.remove("is-visible");
+  renderAvailableLobbies();
+});
 readyToggleButton.addEventListener("click", toggleReady);
 startMultiplayerButton.addEventListener("click", startConfiguredMultiplayer);
 multiplayerBackButton.addEventListener("click", handleMultiplayerBack);
 resultsMainMenuButton.addEventListener("click", showMainMenu);
 resultsReturnButton.addEventListener("click", returnToMultiplayerLobby);
+helpOpenButton.addEventListener("click", showHelpModal);
+helpCloseButton.addEventListener("click", hideHelpModal);
+pauseOpenButton.addEventListener("click", showPauseMenu);
+pauseResumeButton.addEventListener("click", resumePausedRace);
+pauseExitButton.addEventListener("click", exitPausedRace);
+document.querySelectorAll("[data-room-key]").forEach((button) => {
+  button.addEventListener("click", () => pressRoomCodeKey(button.dataset.roomKey));
+});
+window.addEventListener("keydown", (event) => {
+  if (event.key !== "Escape") return;
+  if (raceState.phase === "paused") {
+    resumePausedRace();
+    return;
+  }
+  showPauseMenu();
+});
 multiplayerRoomChannel?.addEventListener("message", syncCurrentRoom);
 window.addEventListener("storage", (event) => {
   if (event.key === multiplayerStorageKey) {
@@ -2479,14 +2943,14 @@ function animate() {
     }
   }
 
-  if (raceState.started && !raceState.finished) {
+  if (raceState.started && !raceState.finished && raceState.phase !== "paused") {
     raceState.elapsed = raceNow - raceState.startTime;
   }
 
   if (raceState.phase === "racing" && (playerControl.handActive || Math.abs(playerControl.speed) > 0.05)) {
     playerControl.speed = THREE.MathUtils.lerp(playerControl.speed, playerControl.targetSpeed, handControlGuide.speedSmoothing);
     playerControl.steer = THREE.MathUtils.lerp(playerControl.steer, playerControl.targetSteer, handControlGuide.steerSmoothing);
-    playerControl.heading += playerControl.steer * delta * 1.9;
+    playerControl.heading += playerControl.steer * delta * handControlGuide.turnRate;
     playerControl.position.x += Math.sin(playerControl.heading) * playerControl.speed * delta;
     playerControl.position.z += Math.cos(playerControl.heading) * playerControl.speed * delta;
     keepPlayerOnTrack();
@@ -2506,12 +2970,8 @@ function animate() {
   updateOpponentVisibility();
   smoothRemotePlayerCars(delta);
   if (raceState.phase === "racing" && raceState.mode !== "multiplayer") {
-    singleplayerAiCars.forEach((car, index) => {
-      const config = singleplayerAiConfigs[index];
-      const startPose = getSingleplayerStartPose(index + 1);
-      placeCar(car, (gridStartProgress + raceState.elapsed * config.speed) % 1, startPose.lane);
-    });
-  } else if (raceState.phase !== "racing") {
+    updateSingleplayerAiCars(delta);
+  } else if (["menu", "countdown", "multiplayer-config", "finished"].includes(raceState.phase)) {
     placeStartingGrid();
   }
 
