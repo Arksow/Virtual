@@ -154,6 +154,7 @@ const raceState = {
   totalLaps: 3,
   lapsCompleted: 0,
   nextCheckpoint: 1,
+  lastCheckpoint: 0,
   phase: "menu",
   started: false,
   finished: false,
@@ -173,6 +174,10 @@ const raceState = {
   players: [],
   spectatingPlayerId: "",
   currentPlaceIndex: -1,
+  wrongWayTimer: 0,
+  wrongWayDistance: 0,
+  wrongWayTeleportGrace: 0,
+  wrongWayPreviousProgress: null,
 };
 
 const standbyScreenMaterial = new THREE.MeshBasicMaterial({ color: 0x0b1417 });
@@ -190,6 +195,11 @@ const checkpointDefinitions = [
 const startCheckpointIndex = 0;
 const checkpointMeshes = [];
 const confettiBursts = [];
+const wrongWayRespawnDelay = 3.25;
+const wrongWayMinimumSpeed = 4;
+const wrongWayTeleportProgressThreshold = 0.045;
+const wrongWayTeleportGraceDelay = 2.25;
+const wrongWayProgressEpsilon = 0.00035;
 const handControlGuide = {
   maxSpeed: 40,
   fistThreshold: 0.62,
@@ -410,27 +420,71 @@ function makeDashedLine(curve, offset, dashLength, gapLength, width) {
   return group;
 }
 
+function createRoadArrowMarking(material, outlineMaterial) {
+  const arrowPoints = [
+    new THREE.Vector2(-0.82, -4.1),
+    new THREE.Vector2(0.82, -4.1),
+    new THREE.Vector2(0.82, 1.1),
+    new THREE.Vector2(2.35, 1.1),
+    new THREE.Vector2(0, 4.35),
+    new THREE.Vector2(-2.35, 1.1),
+    new THREE.Vector2(-0.82, 1.1),
+  ];
+  const triangles = THREE.ShapeUtils.triangulateShape(arrowPoints, []);
+  const vertices = [];
+  const indices = [];
+
+  arrowPoints.forEach((point) => {
+    vertices.push(point.x, 0, point.y);
+  });
+  triangles.forEach((triangle) => {
+    indices.push(...triangle);
+  });
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.Float32BufferAttribute(vertices, 3));
+  geometry.setIndex(indices);
+  geometry.computeVertexNormals();
+
+  const arrow = new THREE.Group();
+  const fill = new THREE.Mesh(geometry, material);
+  fill.receiveShadow = true;
+  arrow.add(fill);
+
+  const outlinePoints = arrowPoints.map((point) => new THREE.Vector3(point.x, 0.035, point.y));
+  outlinePoints.push(outlinePoints[0].clone());
+  const outline = new THREE.Line(
+    new THREE.BufferGeometry().setFromPoints(outlinePoints),
+    outlineMaterial,
+  );
+  arrow.add(outline);
+
+  return arrow;
+}
+
 function makeRacingLine(curve) {
   const group = new THREE.Group();
 
-  const chevronMaterial = new THREE.MeshBasicMaterial({ color: 0xf4ffd0, transparent: true, opacity: 0.88 });
-  for (let i = 0; i < 11; i += 1) {
-    const t = i / 11;
+  const arrowMaterial = new THREE.MeshBasicMaterial({
+    color: 0x211f1f,
+    transparent: true,
+    opacity: 0.82,
+    depthWrite: false,
+    polygonOffset: true,
+    polygonOffsetFactor: -2,
+    polygonOffsetUnits: -2,
+  });
+  const arrowOutlineMaterial = new THREE.LineBasicMaterial({
+    color: 0xf4ffd0,
+    transparent: true,
+    opacity: 0.62,
+  });
+
+  for (let i = 0; i < 9; i += 1) {
+    const t = (i + 0.35) / 9;
     const point = curve.getPointAt(t);
     const tangent = curve.getTangentAt(t).normalize();
-    const arrow = new THREE.Group();
-
-    const stem = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.052, 3.2), chevronMaterial);
-    stem.position.z = -0.9;
-    arrow.add(stem);
-
-    [-1, 1].forEach((side) => {
-      const strip = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.052, 3.5), chevronMaterial);
-      strip.position.set(side * 0.74, 0, 0.82);
-      strip.rotation.y = side * 0.72;
-      strip.receiveShadow = true;
-      arrow.add(strip);
-    });
+    const arrow = createRoadArrowMarking(arrowMaterial, arrowOutlineMaterial);
 
     arrow.position.set(point.x, 0.24, point.z);
     arrow.rotation.y = Math.atan2(tangent.x, tangent.z);
@@ -556,23 +610,57 @@ function addPitLane() {
   world.add(makeDashedLine(pitCurve, 0, 2.6, 3.3, 0.22));
 }
 
-function addCheckpointCircle(t, color) {
+function addCheckpointFlag(t, color) {
   const point = trackCurve.getPointAt(t);
-  const circle = new THREE.Mesh(
-    new THREE.CircleGeometry(16.5, 72),
-    new THREE.MeshBasicMaterial({
-      color,
-      transparent: true,
-      opacity: 0.34,
-      side: THREE.DoubleSide,
-      depthWrite: false,
-    }),
+  const tangent = trackCurve.getTangentAt(t).normalize();
+  const flag = new THREE.Group();
+
+  const base = new THREE.Mesh(
+    new THREE.CylinderGeometry(1.35, 1.65, 0.42, 18),
+    new THREE.MeshStandardMaterial({ color: 0x111514, roughness: 0.55, metalness: 0.14 }),
   );
-  circle.rotation.x = -Math.PI / 2;
-  circle.position.set(point.x, 0.27, point.z);
-  circle.visible = false;
-  world.add(circle);
-  checkpointMeshes.push(circle);
+  base.position.y = 0.21;
+  base.castShadow = true;
+  base.receiveShadow = true;
+
+  const pole = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.13, 0.16, 7.4, 12),
+    new THREE.MeshStandardMaterial({ color: 0xf5f7ef, roughness: 0.34, metalness: 0.55 }),
+  );
+  pole.position.y = 3.9;
+  pole.castShadow = true;
+
+  const flagMaterial = new THREE.MeshStandardMaterial({
+    color,
+    roughness: 0.42,
+    metalness: 0.02,
+    side: THREE.DoubleSide,
+  });
+  const flagGeometry = new THREE.PlaneGeometry(3.8, 2.2, 6, 1);
+  const positions = flagGeometry.attributes.position;
+  for (let i = 0; i < positions.count; i += 1) {
+    const x = positions.getX(i);
+    positions.setZ(i, Math.sin((x + 1.9) * 2.2) * 0.16);
+  }
+  positions.needsUpdate = true;
+  flagGeometry.computeVertexNormals();
+
+  const cloth = new THREE.Mesh(flagGeometry, flagMaterial);
+  cloth.position.set(2.02, 5.9, 0);
+  cloth.castShadow = true;
+
+  const stripe = new THREE.Mesh(
+    new THREE.BoxGeometry(3.6, 0.12, 0.08),
+    new THREE.MeshBasicMaterial({ color: 0xffffff }),
+  );
+  stripe.position.set(2.08, 5.9, 0.04);
+
+  flag.add(base, pole, cloth, stripe);
+  flag.position.set(point.x, 0.1, point.z);
+  flag.rotation.y = Math.atan2(tangent.x, tangent.z) - Math.PI * 0.5;
+  flag.visible = false;
+  world.add(flag);
+  checkpointMeshes.push(flag);
 }
 
 function addTrackFurniture() {
@@ -580,7 +668,7 @@ function addTrackFurniture() {
   world.add(makeTrackWall(trackCurve, -14.25, 1.25));
 
   checkpointDefinitions.forEach((checkpoint) => {
-    addCheckpointCircle(checkpoint.t, checkpoint.color);
+    addCheckpointFlag(checkpoint.t, checkpoint.color);
   });
 }
 
@@ -1031,6 +1119,7 @@ function getPlayerCarState() {
     heading: playerControl.heading,
     progress: playerControl.progress,
     lapsCompleted: raceState.lapsCompleted,
+    lastCheckpoint: raceState.lastCheckpoint,
     speed: playerControl.speed,
     updatedAt: Date.now(),
   };
@@ -1141,13 +1230,120 @@ function placePlayerOnTrack(t, laneOffset) {
   placePlayerCar();
 }
 
+function getWrappedProgressDelta(currentProgress, previousProgress) {
+  let delta = currentProgress - previousProgress;
+  if (delta > 0.5) delta -= 1;
+  if (delta < -0.5) delta += 1;
+  return delta;
+}
+
+function getPlayerTrackLaneOffset() {
+  const nearest = findNearestTrackSample(playerControl.position);
+  const normal = new THREE.Vector3(-nearest.tangent.z, 0, nearest.tangent.x).normalize();
+  return THREE.MathUtils.clamp(
+    new THREE.Vector3().subVectors(playerControl.position, nearest.point).dot(normal),
+    -drivableHalfWidth + playerRailClearance,
+    drivableHalfWidth - playerRailClearance,
+  );
+}
+
+function resetWrongWayTracker() {
+  raceState.wrongWayTimer = 0;
+  raceState.wrongWayDistance = 0;
+  raceState.wrongWayTeleportGrace = 0;
+  raceState.wrongWayPreviousProgress = playerControl.progress;
+  clearWrongWayFeedback();
+}
+
+function respawnPlayerAtLastCheckpoint() {
+  const checkpointIndex = raceState.lastCheckpoint ?? startCheckpointIndex;
+  const checkpoint = checkpointDefinitions[checkpointIndex] ?? checkpointDefinitions[startCheckpointIndex];
+  const laneOffset = getPlayerTrackLaneOffset();
+  placePlayerOnTrack(checkpoint.t, laneOffset);
+  playerControl.speed = 0;
+  playerControl.targetSpeed = 0;
+  playerControl.steer = 0;
+  playerControl.targetSteer = 0;
+  raceState.checkpointCooldown = 0.9;
+  showWrongWayFeedback("Teleport To Checkpoint", true);
+  checkpointFeedbackTimer = window.setTimeout(() => {
+    clearWrongWayFeedback();
+  }, 1200);
+  raceState.wrongWayTimer = 0;
+  raceState.wrongWayDistance = 0;
+  raceState.wrongWayTeleportGrace = 0;
+  raceState.wrongWayPreviousProgress = playerControl.progress;
+  raceState.currentPlaceIndex = -1;
+  updateLocalMultiplayerCarState(true);
+  updateCheckpointVisibility();
+  updateOpponentVisibility();
+  updateRaceHud();
+}
+
+function updateWrongWayRespawn(delta) {
+  if (raceState.phase !== "racing" || !raceState.started || raceState.finished) {
+    raceState.wrongWayTimer = 0;
+    raceState.wrongWayDistance = 0;
+    raceState.wrongWayTeleportGrace = 0;
+    raceState.wrongWayPreviousProgress = null;
+    clearWrongWayFeedback();
+    return;
+  }
+
+  if (raceState.wrongWayPreviousProgress === null) {
+    raceState.wrongWayPreviousProgress = playerControl.progress;
+    return;
+  }
+
+  const progressDelta = getWrappedProgressDelta(playerControl.progress, raceState.wrongWayPreviousProgress);
+  raceState.wrongWayPreviousProgress = playerControl.progress;
+
+  if (progressDelta < -wrongWayProgressEpsilon) {
+    raceState.wrongWayDistance += Math.abs(progressDelta);
+    if (Math.abs(playerControl.speed) >= wrongWayMinimumSpeed) {
+      raceState.wrongWayTimer += delta;
+    }
+  } else if (progressDelta > wrongWayProgressEpsilon) {
+    resetWrongWayTracker();
+    return;
+  } else {
+    if (raceState.wrongWayDistance <= 0.002) {
+      raceState.wrongWayTimer = Math.max(0, raceState.wrongWayTimer - delta * 1.6);
+      if (raceState.wrongWayTimer <= 0.05) {
+        raceState.wrongWayDistance = 0;
+        raceState.wrongWayTeleportGrace = 0;
+        clearWrongWayFeedback();
+      }
+    }
+  }
+
+  const hasWrongWayDistance = raceState.wrongWayDistance >= wrongWayTeleportProgressThreshold;
+  if (hasWrongWayDistance) {
+    raceState.wrongWayTeleportGrace += delta;
+  } else {
+    raceState.wrongWayTeleportGrace = 0;
+  }
+
+  const isAboutToTeleport =
+    raceState.wrongWayTimer >= wrongWayRespawnDelay - 0.7 ||
+    raceState.wrongWayTeleportGrace >= Math.max(wrongWayTeleportGraceDelay - 0.8, 0);
+
+  if (raceState.wrongWayDistance > 0.002 || raceState.wrongWayTimer > 0.05) {
+    showWrongWayFeedback(isAboutToTeleport ? "Teleport To Checkpoint" : "Wrong Way", isAboutToTeleport);
+  }
+
+  if (raceState.wrongWayTimer >= wrongWayRespawnDelay || raceState.wrongWayTeleportGrace >= wrongWayTeleportGraceDelay) {
+    respawnPlayerAtLastCheckpoint();
+  }
+}
+
 function updateOpponentVisibility() {
   const showAiCars = raceState.mode !== "multiplayer";
   if (showAiCars) {
     setCarPaint(playerCar, 0);
   }
   singleplayerAiCars.forEach((car, index) => {
-    car.visible = showAiCars && !(raceState.phase === "racing" && singleplayerAiStates[index].finished);
+    car.visible = showAiCars && !singleplayerAiStates[index].finished;
   });
   remotePlayerCars.forEach((car, playerId) => {
     const player = raceState.players.find((item) => item.id === playerId);
@@ -1608,6 +1804,7 @@ function resetPlayerAtStart() {
 function resetRaceState() {
   raceState.lapsCompleted = 0;
   raceState.nextCheckpoint = 1;
+  raceState.lastCheckpoint = startCheckpointIndex;
   raceState.started = false;
   raceState.finished = false;
   raceState.startTime = 0;
@@ -1618,6 +1815,10 @@ function resetRaceState() {
   raceState.pauseStartTime = 0;
   raceState.spectatingPlayerId = "";
   raceState.currentPlaceIndex = -1;
+  raceState.wrongWayTimer = 0;
+  raceState.wrongWayDistance = 0;
+  raceState.wrongWayTeleportGrace = 0;
+  raceState.wrongWayPreviousProgress = null;
   singleplayerAiStates.forEach((state, index) => {
     state.finished = false;
     state.finishTime = 0;
@@ -1678,10 +1879,26 @@ function showCheckpointFeedback(message) {
 
   window.clearTimeout(checkpointFeedbackTimer);
   checkpointFeedback.textContent = message;
+  checkpointFeedback.classList.remove("is-wrong-way", "is-teleporting");
   checkpointFeedback.classList.add("is-visible");
   checkpointFeedbackTimer = window.setTimeout(() => {
     checkpointFeedback.classList.remove("is-visible");
   }, 1450);
+}
+
+function showWrongWayFeedback(message, isTeleporting = false) {
+  if (!checkpointFeedback) return;
+
+  window.clearTimeout(checkpointFeedbackTimer);
+  checkpointFeedback.textContent = message;
+  checkpointFeedback.classList.toggle("is-teleporting", isTeleporting);
+  checkpointFeedback.classList.add("is-visible", "is-wrong-way");
+}
+
+function clearWrongWayFeedback() {
+  if (!checkpointFeedback?.classList.contains("is-wrong-way")) return;
+
+  checkpointFeedback.classList.remove("is-visible", "is-wrong-way", "is-teleporting");
 }
 
 function showConfettiFeedback(origin) {
@@ -1744,6 +1961,7 @@ function startRace(now = getRaceClockTime()) {
   raceState.elapsed = 0;
   raceState.finishTime = 0;
   raceState.checkpointCooldown = 0.75;
+  resetWrongWayTracker();
   setCameraMode("chase");
   if (!webcamStream) {
     setHandStatus("waiting for driver cam");
@@ -2330,6 +2548,8 @@ function completeCurrentCheckpoint() {
   const reachedCheckpoint = raceState.nextCheckpoint;
   const reachedCheckpointPosition = checkpointMeshes[reachedCheckpoint]?.position.clone();
   raceState.checkpointCooldown = 0.75;
+  raceState.lastCheckpoint = reachedCheckpoint;
+  resetWrongWayTracker();
 
   if (raceState.nextCheckpoint === startCheckpointIndex) {
     raceState.lapsCompleted += 1;
@@ -3152,6 +3372,7 @@ function animate() {
     placePlayerCar();
   }
 
+  updateWrongWayRespawn(delta);
   updateOpponentVisibility();
   smoothRemotePlayerCars(delta);
   if (raceState.phase === "racing" && raceState.mode !== "multiplayer") {

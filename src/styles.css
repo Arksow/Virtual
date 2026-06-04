@@ -1302,6 +1302,38 @@ body:not([data-race-phase="racing"]) .current-place-stat,
   opacity: 1;
 }
 
+.checkpoint-feedback.is-wrong-way {
+  border-color: rgba(255, 66, 66, 0.9);
+  color: #ffffff;
+  background: rgba(211, 30, 30, 0.92);
+  box-shadow:
+    0 16px 40px rgba(0, 0, 0, 0.28),
+    0 0 28px rgba(255, 45, 45, 0.55);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  animation: wrong-way-blink 0.52s ease-in-out infinite alternate;
+}
+
+.checkpoint-feedback.is-teleporting {
+  border-color: rgba(255, 207, 138, 0.95);
+  background: rgba(255, 88, 58, 0.95);
+  box-shadow:
+    0 16px 42px rgba(0, 0, 0, 0.32),
+    0 0 34px rgba(255, 207, 138, 0.6);
+}
+
+@keyframes wrong-way-blink {
+  from {
+    filter: brightness(0.72);
+    transform: translate(-50%, 0) scale(0.98);
+  }
+
+  to {
+    filter: brightness(1.18);
+    transform: translate(-50%, 0) scale(1.02);
+  }
+}
+
 .hand-cursor {
   --cursor-scale: 1;
   position: fixed;
