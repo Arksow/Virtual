@@ -149,13 +149,34 @@ body[data-race-mode="singleplayer"][data-race-phase="racing"] .pause-open-button
 .game-menu-card {
   position: static;
   justify-items: center;
-  gap: 16px;
-  width: min(260px, calc(100vw - 32px));
+  gap: 18px;
+  width: min(440px, calc(100vw - 32px));
   padding: 0;
   border: 0;
   background: transparent;
   box-shadow: none;
   backdrop-filter: none;
+}
+
+.game-title {
+  margin: 0 0 2px;
+  color: #ffffff;
+  width: max-content;
+  max-width: calc(100vw - 32px);
+  font-size: clamp(2.05rem, 5vw, 4rem);
+  font-weight: 1000;
+  line-height: 0.88;
+  text-align: center;
+  text-transform: uppercase;
+  white-space: nowrap;
+  text-shadow:
+    0 2px 0 rgba(18, 20, 15, 0.9),
+    0 0 28px rgba(215, 248, 110, 0.42);
+}
+
+.game-menu[data-state="multiplayer-config"] .game-title,
+.game-menu[data-state="countdown"] .game-title {
+  display: none;
 }
 
 .game-menu:has(.multiplayer-config[data-step="join"]) .game-menu-card {

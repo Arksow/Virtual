@@ -2711,10 +2711,14 @@ function drawControlResults(handResults) {
   handOverlayContext.scale(-1, 1);
   handOverlayContext.translate(-width, 0);
   handOverlayContext.lineCap = "round";
+  handOverlayContext.lineJoin = "round";
+  handOverlayContext.font = `${Math.max(10, width * 0.032)}px Inter, sans-serif`;
 
-  hands.forEach((landmarks) => {
-    handOverlayContext.strokeStyle = "rgba(215, 248, 110, 0.62)";
-    handOverlayContext.lineWidth = Math.max(1.4, width * 0.003);
+  hands.forEach((landmarks, handIndex) => {
+    const handedness = getHandednessLabel(handResults, handIndex) || "Hand";
+
+    handOverlayContext.strokeStyle = "rgba(215, 248, 110, 0.9)";
+    handOverlayContext.lineWidth = Math.max(2.2, width * 0.006);
     handConnections.forEach(([start, end]) => {
       const from = landmarks[start];
       const to = landmarks[end];
@@ -2725,11 +2729,24 @@ function drawControlResults(handResults) {
     });
 
     landmarks.forEach((landmark, index) => {
-      handOverlayContext.fillStyle = index === 0 ? "rgba(255, 255, 255, 0.9)" : "rgba(255, 207, 56, 0.9)";
+      const isPinchFinger = index === 4 || index === 8;
+      const isWrist = index === 0;
+      const radius = isPinchFinger ? Math.max(5, width * 0.018) : isWrist ? Math.max(4, width * 0.014) : Math.max(3, width * 0.01);
+      handOverlayContext.fillStyle = isPinchFinger ? "rgba(255, 207, 138, 0.96)" : isWrist ? "rgba(255, 255, 255, 0.96)" : "rgba(59, 183, 255, 0.94)";
+      handOverlayContext.strokeStyle = "rgba(5, 8, 8, 0.78)";
+      handOverlayContext.lineWidth = Math.max(1.4, width * 0.004);
       handOverlayContext.beginPath();
-      handOverlayContext.arc(landmark.x * width, landmark.y * height, index === 0 ? 3.5 : 2.2, 0, Math.PI * 2);
+      handOverlayContext.arc(landmark.x * width, landmark.y * height, radius, 0, Math.PI * 2);
       handOverlayContext.fill();
+      handOverlayContext.stroke();
     });
+
+    const wrist = landmarks[0];
+    handOverlayContext.scale(-1, 1);
+    handOverlayContext.fillStyle = "rgba(215, 248, 110, 0.95)";
+    handOverlayContext.textAlign = "center";
+    handOverlayContext.fillText(handedness, -(wrist.x * width), Math.max(14, wrist.y * height - 12));
+    handOverlayContext.scale(-1, 1);
   });
 
   handOverlayContext.restore();
