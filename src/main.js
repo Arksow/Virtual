@@ -1,6 +1,7 @@
 import "./styles.css";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
+import { FBXLoader } from "three/examples/jsm/loaders/FBXLoader.js";
 import { FilesetResolver, HandLandmarker } from "@mediapipe/tasks-vision";
 
 const canvas = document.querySelector("#scene");
@@ -177,7 +178,7 @@ const raceState = {
 const standbyScreenMaterial = new THREE.MeshBasicMaterial({ color: 0x0b1417 });
 const trackSamples = [];
 const drivableHalfWidth = 12.6;
-const playerRailClearance = 1.45;
+const playerRailClearance = 0.86;
 const checkpointRadius = 17;
 const startLineProgress = 0.02;
 const gridStartProgress = 0.985;
@@ -208,18 +209,29 @@ const handCursorGuide = {
 };
 const speedometerScale = 4;
 const singleplayerAiConfigs = [
-  { name: "Falcon", color: 0x2f70ff, trim: 0xf5f1e8, speed: 0.031 },
-  { name: "Viper", color: 0xffc638, trim: 0x222222, speed: 0.027 },
-  { name: "Comet", color: 0x22c78a, trim: 0x0f2018, speed: 0.025 },
-  { name: "Nova", color: 0xf064c8, trim: 0x190d16, speed: 0.023 },
-  { name: "Pulse", color: 0x6de7ff, trim: 0x10202a, speed: 0.021 },
+  { name: "Falcon", color: 0x2f70ff, trim: 0xf5f1e8, speed: 0.031, difficultyRange: [1.04, 1.14] },
+  { name: "Viper", color: 0xffc638, trim: 0x222222, speed: 0.027, difficultyRange: [0.99, 1.1] },
+  { name: "Comet", color: 0x22c78a, trim: 0x0f2018, speed: 0.025, difficultyRange: [0.95, 1.08] },
+  { name: "Nova", color: 0xf064c8, trim: 0x190d16, speed: 0.023, difficultyRange: [0.91, 1.04] },
+  { name: "Pulse", color: 0x6de7ff, trim: 0x10202a, speed: 0.021, difficultyRange: [0.88, 1.02] },
 ];
 const singleplayerAiStates = singleplayerAiConfigs.map(() => ({
   finished: false,
   finishTime: 0,
   progress: 0,
   speedMultiplier: 1,
+  difficultyMultiplier: 1,
 }));
+
+function getAiDifficultyMultiplier(config) {
+  const [minDifficulty = 1, maxDifficulty = 1] = config.difficultyRange ?? [1, 1];
+  return THREE.MathUtils.lerp(minDifficulty, maxDifficulty, Math.random());
+}
+
+function getAiBaseSpeed(config, state) {
+  return config.speed * (state?.difficultyMultiplier ?? 1);
+}
+
 const formulaGridLanes = [-6.4, 6.4];
 const formulaGridRowOffset = 0.022;
 const maxMultiplayerPlayers = 5;
@@ -232,11 +244,14 @@ const multiplayerCarColors = [
   [0x6de7ff, 0x10202a],
 ];
 const carModelRotationOffset = Math.PI;
+const f1ModelPath = "/models/ModelCar.fbx";
+const f1ModelScale = 0.015;
 const multiplayerStorageKey = "ridgeway-arena-multiplayer-rooms";
 const multiplayerRoomChannel =
   "BroadcastChannel" in window ? new BroadcastChannel("ridgeway-arena-multiplayer-rooms") : null;
 let multiplayerSocket = null;
 let multiplayerSocketConnected = false;
+let loadedF1CarModel = null;
 const handConnections = [
   [0, 1],
   [1, 2],
@@ -282,8 +297,8 @@ const trackCurve = new THREE.CatmullRomCurve3(
   0.5,
 );
 
-for (let i = 0; i < 360; i += 1) {
-  const t = i / 360;
+for (let i = 0; i < 720; i += 1) {
+  const t = i / 720;
   trackSamples.push({
     point: trackCurve.getPointAt(t),
     tangent: trackCurve.getTangentAt(t).normalize(),
@@ -318,15 +333,20 @@ function keepPlayerOnTrack() {
   const clampedOffset = THREE.MathUtils.clamp(offset, -safeHalfWidth, safeHalfWidth);
 
   if (Math.abs(clampedOffset - offset) > 0.001) {
+    const outwardSide = Math.sign(offset || clampedOffset || 1);
     playerControl.position.copy(nearest.point).addScaledVector(normal, clampedOffset);
-    playerControl.speed *= 0.34;
-    playerControl.targetSpeed = Math.min(playerControl.targetSpeed, handControlGuide.maxSpeed * 0.42);
     const trackHeading = Math.atan2(nearest.tangent.x, nearest.tangent.z);
     const reverseTrackHeading = trackHeading + Math.PI;
     const forwardDelta = Math.abs(Math.atan2(Math.sin(playerControl.heading - trackHeading), Math.cos(playerControl.heading - trackHeading)));
     const railHeading = forwardDelta <= Math.PI * 0.5 ? trackHeading : reverseTrackHeading;
-    playerControl.heading = lerpAngle(playerControl.heading, railHeading, 0.32);
-    playerControl.targetSteer = 0;
+    const headingVector = new THREE.Vector3(Math.sin(playerControl.heading), 0, Math.cos(playerControl.heading)).normalize();
+    const outwardDrive = Math.max(0, headingVector.dot(normal) * outwardSide);
+    const headingBlend = THREE.MathUtils.clamp(0.12 + outwardDrive * 0.32, 0.12, 0.44);
+    playerControl.heading = lerpAngle(playerControl.heading, railHeading, headingBlend);
+    playerControl.visualHeading = lerpAngle(playerControl.visualHeading, playerControl.heading, 0.28);
+    playerControl.speed *= THREE.MathUtils.lerp(0.98, 0.72, outwardDrive);
+    playerControl.targetSpeed = Math.min(playerControl.targetSpeed, handControlGuide.maxSpeed * THREE.MathUtils.lerp(0.92, 0.68, outwardDrive));
+    playerControl.targetSteer *= 0.35;
   }
 
   playerControl.progress = nearest.t;
@@ -741,6 +761,9 @@ function createWedgeBodyGeometry() {
 
 function createCar(color, trimColor = 0x111111) {
   const car = new THREE.Group();
+  car.userData.trimColor = trimColor;
+  const fallbackModel = new THREE.Group();
+  fallbackModel.userData.fallbackModel = true;
   const body = new THREE.Mesh(createWedgeBodyGeometry(), color);
   body.userData.paint = true;
   body.position.y = 0.48;
@@ -772,7 +795,7 @@ function createCar(color, trimColor = 0x111111) {
       wheel.rotation.z = Math.PI / 2;
       wheel.position.set(x, 0.55, z);
       wheel.castShadow = true;
-      car.add(wheel);
+      fallbackModel.add(wheel);
     });
   });
 
@@ -780,11 +803,147 @@ function createCar(color, trimColor = 0x111111) {
   [-1.05, 1.05].forEach((x) => {
     const headlight = new THREE.Mesh(new THREE.BoxGeometry(0.78, 0.12, 0.08), headlightMaterial);
     headlight.position.set(x, 0.88, -3.86);
-    car.add(headlight);
+    fallbackModel.add(headlight);
   });
 
-  car.add(body, nose, cockpit, wing, splitter);
+  fallbackModel.add(body, nose, cockpit, wing, splitter);
+  car.add(fallbackModel);
   return car;
+}
+
+function getCarPaintColor(car) {
+  let paintColor = 0xe23d35;
+  car.traverse((child) => {
+    const materialsToCheck = Array.isArray(child.material) ? child.material : [child.material];
+    if (child.userData.paint && materialsToCheck[0]?.color) {
+      paintColor = materialsToCheck[0].color.getHex();
+    }
+  });
+  return paintColor;
+}
+
+function getCarTrimColor(car) {
+  return car.userData.trimColor ?? 0x111111;
+}
+
+function getPaintVariants(paintColor, trimColor) {
+  const body = new THREE.Color(paintColor);
+  const accent = new THREE.Color(paintColor).lerp(new THREE.Color(0xffffff), 0.28);
+  const shadow = new THREE.Color(paintColor).lerp(new THREE.Color(0x050606), 0.32);
+  return {
+    body,
+    accent: trimColor === 0x111111 ? accent : new THREE.Color(trimColor),
+    highlight: shadow,
+  };
+}
+
+function createLoadedCarMaterialPalette(paintColor, trimColor) {
+  const variants = getPaintVariants(paintColor, trimColor);
+  return {
+    body: new THREE.MeshStandardMaterial({ color: variants.body, roughness: 0.38, metalness: 0.2 }),
+    accent: new THREE.MeshStandardMaterial({ color: variants.accent, roughness: 0.42, metalness: 0.18 }),
+    highlight: new THREE.MeshStandardMaterial({ color: variants.highlight, roughness: 0.36, metalness: 0.22 }),
+    dark: new THREE.MeshStandardMaterial({ color: 0x070808, roughness: 0.62, metalness: 0.08 }),
+    tire: new THREE.MeshStandardMaterial({ color: 0x050505, roughness: 0.78, metalness: 0.02 }),
+    metal: new THREE.MeshStandardMaterial({ color: 0x858b8d, roughness: 0.34, metalness: 0.72 }),
+  };
+}
+
+function chooseF1Material(originalMaterial, objectName, palette) {
+  const materialName = (originalMaterial?.name ?? "").toLowerCase();
+  const name = `${objectName} ${materialName}`.toLowerCase();
+  if (name.includes("tire")) return palette.tire;
+  if (materialName.includes("mirror")) return palette.metal;
+  if (materialName.includes("2ndcolor") || materialName.includes("bloody red")) return palette.accent;
+  if (materialName.includes("3rdcolor")) return palette.highlight;
+  if (materialName.includes("basecolor")) return palette.body;
+  if (materialName.includes("dark black") || name.includes("rod") || name.includes("exhaust") || name.includes("wing")) {
+    return palette.dark;
+  }
+  return palette.body;
+}
+
+function setLoadedCarPaint(car, bodyColor) {
+  const variants = getPaintVariants(bodyColor, getCarTrimColor(car));
+  car.traverse((child) => {
+    const paintMaterials = child.userData.paintMaterials ?? [];
+    paintMaterials.forEach(({ material, role }) => {
+      if (role === "body") material.color.copy(variants.body);
+      if (role === "accent") material.color.copy(variants.accent);
+      if (role === "highlight") material.color.copy(variants.highlight);
+    });
+  });
+}
+
+function fitModelToCar(model) {
+  const bounds = new THREE.Box3().setFromObject(model);
+  const size = new THREE.Vector3();
+  bounds.getSize(size);
+  if (!size.length()) return;
+
+  const targetLength = 7.6;
+  const targetWidth = 5.2;
+  const modelScale = Math.min(targetLength / Math.max(size.z, 0.001), targetWidth / Math.max(size.x, 0.001));
+  model.scale.multiplyScalar(modelScale);
+
+  const fittedBounds = new THREE.Box3().setFromObject(model);
+  const center = new THREE.Vector3();
+  fittedBounds.getCenter(center);
+  model.position.sub(center);
+  const groundedBounds = new THREE.Box3().setFromObject(model);
+  model.position.y -= groundedBounds.min.y;
+}
+
+function applyLoadedCarModel(car, sourceModel) {
+  const paintColor = getCarPaintColor(car);
+  const trimColor = getCarTrimColor(car);
+  const loadedModel = sourceModel.clone(true);
+  loadedModel.userData.loadedCarModel = true;
+  loadedModel.scale.setScalar(f1ModelScale);
+  loadedModel.rotation.y = Math.PI;
+
+  const palette = createLoadedCarMaterialPalette(paintColor, trimColor);
+
+  loadedModel.traverse((child) => {
+    if (!child.isMesh) return;
+    child.castShadow = true;
+    child.receiveShadow = true;
+    const originalMaterials = Array.isArray(child.material) ? child.material : [child.material];
+    const assignedMaterials = originalMaterials.map((material) => chooseF1Material(material, child.name, palette));
+    child.material = Array.isArray(child.material) ? assignedMaterials : assignedMaterials[0];
+    child.userData.paintMaterials = assignedMaterials
+      .map((material) => {
+        if (material === palette.body) return { material, role: "body" };
+        if (material === palette.accent) return { material, role: "accent" };
+        if (material === palette.highlight) return { material, role: "highlight" };
+        return null;
+      })
+      .filter(Boolean);
+    child.userData.paint = child.userData.paintMaterials.length > 0;
+    child.userData.hoverCar = car;
+  });
+
+  fitModelToCar(loadedModel);
+  car.children.filter((child) => child.userData.loadedCarModel).forEach((child) => car.remove(child));
+  car.children.forEach((child) => {
+    if (child.userData.fallbackModel) child.visible = false;
+  });
+  car.add(loadedModel);
+}
+
+function loadF1CarModel() {
+  const loader = new FBXLoader();
+  loader.load(
+    f1ModelPath,
+    (model) => {
+      loadedF1CarModel = model;
+      [...singleplayerAiCars, playerCar, ...remotePlayerCars.values()].forEach((car) => applyLoadedCarModel(car, model));
+    },
+    undefined,
+    (error) => {
+      console.warn("Could not load F1 car model, using fallback cars:", error);
+    },
+  );
 }
 
 const playerCar = createCar(materials.red, 0x111111);
@@ -827,6 +986,7 @@ singleplayerAiCars.forEach((car, index) => {
   setCarDisplayName(car, singleplayerAiConfigs[index].name);
 });
 const remotePlayerCars = new Map();
+loadF1CarModel();
 
 function getLocalPlayer() {
   return raceState.players.find((player) => player.id === raceState.playerId);
@@ -879,10 +1039,12 @@ function getPlayerCarState() {
 function setCarPaint(car, playerIndex) {
   const [bodyColor] = multiplayerCarColors[playerIndex % multiplayerCarColors.length];
   car.traverse((child) => {
-    if (child.userData.paint && child.material?.color) {
-      child.material.color.setHex(bodyColor);
+    const materialsToPaint = Array.isArray(child.material) ? child.material : [child.material];
+    if (child.userData.paint && !child.userData.paintMaterials && materialsToPaint[0]?.color) {
+      materialsToPaint[0].color.setHex(bodyColor);
     }
   });
+  setLoadedCarPaint(car, bodyColor);
 }
 
 function applyCarStateToPlayerControl(carState) {
@@ -998,6 +1160,9 @@ function updateOpponentVisibility() {
 function createRemotePlayerCar(playerIndex) {
   const [bodyColor, trimColor] = multiplayerCarColors[playerIndex % multiplayerCarColors.length];
   const car = createCar(new THREE.MeshStandardMaterial({ color: bodyColor, roughness: 0.45, metalness: 0.15 }), trimColor);
+  if (loadedF1CarModel) {
+    applyLoadedCarModel(car, loadedF1CarModel);
+  }
   markCarForHover(car, "Player");
   car.userData.targetPosition = new THREE.Vector3();
   car.userData.targetHeading = 0;
@@ -1208,9 +1373,10 @@ function getSingleplayerResults() {
     const state = singleplayerAiStates[index];
     const remainingProgress = Math.max(raceState.totalLaps - (state?.progress ?? 0), 0);
     const currentMultiplier = Math.max(state?.speedMultiplier ?? 1, 0.48);
+    const baseSpeed = getAiBaseSpeed(config, state);
     return {
       name: config.name,
-      time: state?.finishTime || raceState.elapsed + remainingProgress / (config.speed * currentMultiplier),
+      time: state?.finishTime || raceState.elapsed + remainingProgress / (baseSpeed * currentMultiplier),
     };
   });
   return [{ name: "You", time: playerTime }, ...aiResults].sort((a, b) => a.time - b.time);
@@ -1254,7 +1420,8 @@ function getCurrentMultiplayerPlaceIndex() {
 function getSingleplayerAiProgress(index) {
   const config = singleplayerAiConfigs[index];
   const state = singleplayerAiStates[index];
-  return Math.min(state.progress || (state.finished ? state.finishTime * config.speed : raceState.elapsed * config.speed), raceState.totalLaps);
+  const baseSpeed = getAiBaseSpeed(config, state);
+  return Math.min(state.progress || (state.finished ? state.finishTime * baseSpeed : raceState.elapsed * baseSpeed), raceState.totalLaps);
 }
 
 function getCurrentSingleplayerPlaceIndex() {
@@ -1451,11 +1618,12 @@ function resetRaceState() {
   raceState.pauseStartTime = 0;
   raceState.spectatingPlayerId = "";
   raceState.currentPlaceIndex = -1;
-  singleplayerAiStates.forEach((state) => {
+  singleplayerAiStates.forEach((state, index) => {
     state.finished = false;
     state.finishTime = 0;
     state.progress = 0;
     state.speedMultiplier = 1;
+    state.difficultyMultiplier = getAiDifficultyMultiplier(singleplayerAiConfigs[index]);
   });
   clearPlaceFeedback();
   spectatorSwitchCooldown = 0;
@@ -2233,7 +2401,7 @@ function updateSingleplayerAiCars(delta) {
     const gapToPlayer = state.progress - playerProgress - targetGap;
     const targetMultiplier = THREE.MathUtils.clamp(1 - gapToPlayer * 1.85, 0.48, 1.62);
     state.speedMultiplier = THREE.MathUtils.lerp(state.speedMultiplier, targetMultiplier, 1 - Math.exp(-delta * 1.6));
-    state.progress = Math.min(state.progress + config.speed * state.speedMultiplier * delta, raceState.totalLaps);
+    state.progress = Math.min(state.progress + getAiBaseSpeed(config, state) * state.speedMultiplier * delta, raceState.totalLaps);
 
     if (state.progress >= raceState.totalLaps) {
       state.finished = true;

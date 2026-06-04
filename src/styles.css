@@ -635,7 +635,7 @@ body[data-race-mode="singleplayer"][data-race-phase="racing"] .pause-open-button
   z-index: 9;
   display: grid;
   place-items: center;
-  padding: 20px;
+  padding: 12px;
   background: rgba(8, 11, 9, 0.62);
   backdrop-filter: blur(12px);
 }
@@ -655,11 +655,11 @@ body[data-race-mode="singleplayer"][data-race-phase="racing"] .pause-open-button
 
 .help-panel {
   display: grid;
-  gap: 14px;
-  width: min(430px, calc(100vw - 32px));
-  max-height: calc(100vh - 40px);
+  gap: 10px;
+  width: min(980px, calc(100vw - 24px));
+  max-height: calc(100vh - 24px);
   overflow: auto;
-  padding: 18px;
+  padding: 14px;
   border: 1px solid rgba(215, 248, 110, 0.32);
   border-radius: 8px;
   background: rgba(16, 19, 15, 0.9);
@@ -728,28 +728,41 @@ body[data-race-mode="singleplayer"][data-race-phase="racing"] .pause-open-button
   color: #d7f86e;
   font-size: 0.72rem;
   font-weight: 900;
+  line-height: 1;
   text-align: center;
   text-transform: uppercase;
 }
 
 .help-panel h1 {
   color: #ffffff;
-  font-size: 1.7rem;
+  font-size: 1.55rem;
   line-height: 1;
   text-align: center;
 }
 
 .help-steps {
   display: grid;
-  gap: 10px;
+  gap: 8px;
+}
+
+.help-content {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 230px;
+  align-items: stretch;
+  gap: 12px;
+}
+
+.help-section {
+  display: grid;
+  gap: 7px;
 }
 
 .help-step {
   display: grid;
-  grid-template-columns: 86px 1fr;
+  grid-template-columns: 74px 1fr;
   align-items: center;
-  gap: 12px;
-  padding: 10px;
+  gap: 10px;
+  padding: 8px;
   border: 1px solid rgba(255, 255, 255, 0.14);
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.07);
@@ -757,42 +770,156 @@ body[data-race-mode="singleplayer"][data-race-phase="racing"] .pause-open-button
 
 .help-step h2 {
   color: #ffffff;
-  font-size: 0.98rem;
+  font-size: 0.94rem;
   line-height: 1.1;
 }
 
 .help-step p {
-  margin-top: 4px;
+  margin-top: 3px;
   color: #d9e2de;
-  font-size: 0.8rem;
+  font-size: 0.76rem;
   font-weight: 700;
   line-height: 1.35;
 }
 
 .help-picture {
   position: relative;
-  height: 62px;
+  height: 52px;
   border-radius: 8px;
   background:
     radial-gradient(circle at 50% 78%, rgba(215, 248, 110, 0.22), transparent 48%),
     rgba(16, 19, 15, 0.72);
 }
 
+.help-credit-card {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 10px;
+  min-height: 0;
+  height: 100%;
+  padding: 10px;
+  border: 1px solid rgba(215, 248, 110, 0.24);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.07);
+  text-align: center;
+}
+
+.help-credit-card > div:last-child {
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  min-height: 52px;
+}
+
+.credits-section {
+  display: grid;
+  grid-template-rows: auto auto 1fr;
+  align-self: stretch;
+  gap: 8px;
+}
+
+.credits-section::before {
+  display: block;
+  height: 0.72rem;
+  content: "";
+}
+
+.credits-section h1 {
+  color: #ffffff;
+  font-size: 1.55rem;
+  line-height: 1;
+  text-align: center;
+}
+
+.help-credit-card p,
+.help-credit-card strong {
+  margin: 0;
+}
+
+.help-credit-card p {
+  color: #b9c7c1;
+  font-size: 0.72rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.help-credit-card strong {
+  color: #ffffff;
+  font-size: 0.98rem;
+  line-height: 1.1;
+}
+
+.credit-model-image {
+  position: relative;
+  width: 92px;
+  height: 52px;
+  border: 1px solid rgba(215, 248, 110, 0.26);
+  border-radius: 8px;
+  background:
+    radial-gradient(circle at 52% 72%, rgba(215, 248, 110, 0.24), transparent 52%),
+    linear-gradient(180deg, rgba(59, 183, 255, 0.16), rgba(16, 19, 15, 0.72));
+  overflow: hidden;
+}
+
+.credit-car-body,
+.credit-car-wing,
+.credit-car-wheel {
+  position: absolute;
+  display: block;
+}
+
+.credit-car-body {
+  left: 18px;
+  top: 22px;
+  width: 56px;
+  height: 14px;
+  border-radius: 13px 18px 8px 8px;
+  background: #d7f86e;
+  transform: skewX(-16deg);
+}
+
+.credit-car-wing {
+  left: 14px;
+  top: 17px;
+  width: 68px;
+  height: 5px;
+  border-radius: 999px;
+  background: #f8fbff;
+}
+
+.credit-car-wheel {
+  top: 33px;
+  width: 12px;
+  height: 12px;
+  border: 3px solid #050505;
+  border-radius: 50%;
+  background: #858b8d;
+}
+
+.credit-car-wheel.front {
+  left: 57px;
+}
+
+.credit-car-wheel.rear {
+  left: 25px;
+}
+
 .help-picture span {
   position: absolute;
-  top: 21px;
-  width: 24px;
-  height: 24px;
+  top: 17px;
+  width: 22px;
+  height: 22px;
   border: 3px solid #d7f86e;
   background: rgba(215, 248, 110, 0.16);
 }
 
 .help-picture span:first-child {
-  left: 17px;
+  left: 14px;
 }
 
 .help-picture span:last-child {
-  right: 17px;
+  right: 14px;
 }
 
 .hands-fist span {
@@ -801,19 +928,19 @@ body[data-race-mode="singleplayer"][data-race-phase="racing"] .pause-open-button
 }
 
 .hands-open span {
-  width: 26px;
-  height: 32px;
+  width: 23px;
+  height: 28px;
   border-radius: 14px 14px 7px 7px;
 }
 
 .hands-turn span:first-child {
-  top: 30px;
+  top: 25px;
   border-color: #3bb7ff;
   border-radius: 50%;
 }
 
 .hands-turn span:last-child {
-  top: 12px;
+  top: 9px;
   border-color: #ffcf8a;
   border-radius: 50%;
 }
@@ -1298,6 +1425,14 @@ h1 {
 }
 
 @media (max-width: 620px) {
+  .help-content {
+    grid-template-columns: 1fr;
+  }
+
+  .credit-model-image {
+    width: 98px;
+  }
+
   .multiplayer-config[data-step="join"] {
     grid-template-columns: 1fr;
   }
