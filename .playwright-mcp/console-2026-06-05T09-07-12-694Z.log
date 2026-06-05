@@ -1,0 +1,5 @@
+[  378337ms] [ERROR] WebSocket connection to 'ws://127.0.0.1:5180/multiplayer' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:5180/assets/index-Dd5bj6mV.js:3960
+[  384087ms] [ERROR] WebSocket connection to 'ws://127.0.0.1:5180/multiplayer' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:5180/assets/index-Dd5bj6mV.js:3960
+[  389379ms] [ERROR] WebSocket connection to 'ws://127.0.0.1:5180/multiplayer' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:5180/assets/index-Dd5bj6mV.js:3960
+[  397040ms] [ERROR] WebSocket connection to 'ws://127.0.0.1:5180/multiplayer' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:5180/assets/index-Dd5bj6mV.js:3960
+[  402586ms] [ERROR] WebSocket connection to 'ws://127.0.0.1:5180/multiplayer' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:5180/assets/index-Dd5bj6mV.js:3960
