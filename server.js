@@ -7,7 +7,16 @@ import { WebSocketServer } from "ws";
 const host = process.env.HOST ?? "0.0.0.0";
 const httpPort = Number(process.env.HTTP_PORT ?? 5173);
 const httpsPort = Number(process.env.HTTPS_PORT ?? 5174);
+const maxPlayersPerRoom = 5;
 const rooms = {};
+
+function createRoomCode() {
+  let code = "";
+  do {
+    code = Math.random().toString(36).slice(2, 6).toUpperCase();
+  } while (rooms[code]);
+  return code;
+}
 
 function normalizeRoomPlayers(players = []) {
   if (!players.length) return [];
@@ -91,6 +100,16 @@ function broadcastRooms(wss) {
   });
 }
 
+function sendActionResult(socket, requestId, result) {
+  if (!requestId) return;
+  send(socket, { type: "actionResult", requestId, ...result, rooms });
+}
+
+function touchSocketRoom(socket, roomCode, playerId) {
+  socket.roomCode = roomCode;
+  socket.playerId = playerId;
+}
+
 function removePlayerFromRoom(roomCode, playerId) {
   const room = rooms[roomCode];
   if (!room || !playerId) return false;
@@ -125,6 +144,173 @@ function handleMessage(wss, socket, event) {
     Object.entries(message.rooms ?? {}).forEach(([roomCode, room]) => {
       rooms[roomCode] = mergeRoom(rooms[roomCode], room);
     });
+    broadcastRooms(wss);
+    return;
+  }
+
+  if (message.type === "createRoom") {
+    const player = message.player;
+    if (!player?.id || !player?.name) {
+      sendActionResult(socket, message.requestId, { ok: false, message: "Enter your name before creating a room." });
+      return;
+    }
+
+    const roomCode = createRoomCode();
+    const leader = {
+      ...player,
+      ready: true,
+      leader: true,
+      finished: false,
+      finishTime: null,
+    };
+    rooms[roomCode] = normalizeRoom({
+      code: roomCode,
+      players: [leader],
+      started: false,
+      startedAt: null,
+      leftPlayerIds: [],
+    });
+    touchSocketRoom(socket, roomCode, player.id);
+    sendActionResult(socket, message.requestId, { ok: true, roomCode, room: rooms[roomCode] });
+    broadcastRooms(wss);
+    return;
+  }
+
+  if (message.type === "joinRoom") {
+    const roomCode = String(message.roomCode ?? "").trim().toUpperCase();
+    const player = message.player;
+    const room = rooms[roomCode];
+    if (!roomCode || !player?.id || !player?.name) {
+      sendActionResult(socket, message.requestId, { ok: false, message: "Enter a room code and player name." });
+      return;
+    }
+    if (!room) {
+      sendActionResult(socket, message.requestId, { ok: false, message: "Room code not found." });
+      return;
+    }
+    if (room.started) {
+      sendActionResult(socket, message.requestId, { ok: false, message: "Race already started." });
+      return;
+    }
+
+    const currentPlayers = normalizeRoomPlayers(room.players ?? []);
+    const isRejoiningPlayer = currentPlayers.some((roomPlayer) => roomPlayer.id === player.id);
+    if (!isRejoiningPlayer && currentPlayers.length >= maxPlayersPerRoom) {
+      sendActionResult(socket, message.requestId, { ok: false, message: "Lobby full." });
+      return;
+    }
+
+    rooms[roomCode] = normalizeRoom({
+      ...room,
+      leftPlayerIds: (room.leftPlayerIds ?? []).filter((playerId) => playerId !== player.id),
+      players: [
+        ...currentPlayers.filter((roomPlayer) => roomPlayer.id !== player.id),
+        {
+          ...player,
+          ready: false,
+          leader: false,
+          finished: false,
+          finishTime: null,
+        },
+      ],
+    });
+    touchSocketRoom(socket, roomCode, player.id);
+    sendActionResult(socket, message.requestId, { ok: true, roomCode, room: rooms[roomCode] });
+    broadcastRooms(wss);
+    return;
+  }
+
+  if (message.type === "toggleReady") {
+    const room = rooms[message.roomCode];
+    if (!room || !message.playerId) {
+      sendActionResult(socket, message.requestId, { ok: false, message: "Room closed." });
+      return;
+    }
+
+    rooms[message.roomCode] = normalizeRoom({
+      ...room,
+      players: room.players.map((player) =>
+        player.id === message.playerId && !player.leader ? { ...player, ready: !player.ready } : player,
+      ),
+    });
+    sendActionResult(socket, message.requestId, { ok: true, room: rooms[message.roomCode] });
+    broadcastRooms(wss);
+    return;
+  }
+
+  if (message.type === "startRace") {
+    const room = rooms[message.roomCode];
+    const player = room?.players.find((roomPlayer) => roomPlayer.id === message.playerId);
+    if (!room || !player?.leader) {
+      sendActionResult(socket, message.requestId, { ok: false, message: "Only the room leader can start." });
+      return;
+    }
+    const otherPlayers = room.players.filter((roomPlayer) => !roomPlayer.leader);
+    if (!otherPlayers.length) {
+      sendActionResult(socket, message.requestId, { ok: false, message: "Waiting for other players." });
+      return;
+    }
+    if (!otherPlayers.every((roomPlayer) => roomPlayer.ready)) {
+      sendActionResult(socket, message.requestId, { ok: false, message: "Waiting for other players to be ready." });
+      return;
+    }
+
+    rooms[message.roomCode] = normalizeRoom({
+      ...room,
+      started: true,
+      startedAt: Number(message.startedAt) || Date.now(),
+      players: room.players.map((roomPlayer, index) => ({
+        ...roomPlayer,
+        ready: roomPlayer.leader ? true : roomPlayer.ready,
+        finished: false,
+        finishTime: null,
+        carState: message.startStates?.[roomPlayer.id] ?? roomPlayer.carState,
+      })),
+    });
+    sendActionResult(socket, message.requestId, { ok: true, room: rooms[message.roomCode] });
+    broadcastRooms(wss);
+    return;
+  }
+
+  if (message.type === "updatePlayerState") {
+    const room = rooms[message.roomCode];
+    if (!room || !message.playerId) return;
+    rooms[message.roomCode] = normalizeRoom({
+      ...room,
+      players: room.players.map((player) =>
+        player.id === message.playerId
+          ? {
+              ...player,
+              carState: message.carState ?? player.carState,
+              finished: message.finished ?? player.finished,
+              finishTime: Number.isFinite(message.finishTime) ? message.finishTime : player.finishTime,
+            }
+          : player,
+      ),
+    });
+    broadcastRooms(wss);
+    return;
+  }
+
+  if (message.type === "resetLobby") {
+    const room = rooms[message.roomCode];
+    if (!room) {
+      sendActionResult(socket, message.requestId, { ok: false, message: "Room closed." });
+      return;
+    }
+    rooms[message.roomCode] = normalizeRoom({
+      ...room,
+      started: false,
+      startedAt: null,
+      players: room.players.map((player, index) => ({
+        ...player,
+        ready: player.leader,
+        finished: false,
+        finishTime: null,
+        carState: message.startStates?.[player.id] ?? player.carState,
+      })),
+    });
+    sendActionResult(socket, message.requestId, { ok: true, room: rooms[message.roomCode] });
     broadcastRooms(wss);
     return;
   }

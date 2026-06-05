@@ -261,6 +261,8 @@ const multiplayerRoomChannel =
   "BroadcastChannel" in window ? new BroadcastChannel("ridgeway-arena-multiplayer-rooms") : null;
 let multiplayerSocket = null;
 let multiplayerSocketConnected = false;
+let multiplayerRoomsCache = {};
+const multiplayerPendingRequests = new Map();
 let loadedF1CarModel = null;
 const handConnections = [
   [0, 1],
@@ -1168,15 +1170,24 @@ function updateLocalMultiplayerCarState(force = false) {
   const now = Date.now();
   if (!force && now - lastMultiplayerPositionSync < 80) return;
   lastMultiplayerPositionSync = now;
-  const updatedRoom = updateStoredRoom(raceState.roomCode, (room) => ({
-    ...room,
-    players: room.players.map((player) =>
-      player.id === raceState.playerId ? { ...player, carState: getPlayerCarState() } : player,
-    ),
-  }));
-  if (updatedRoom) {
+  const carState = getPlayerCarState();
+  const room = getStoredRoom();
+  if (room) {
+    const updatedRoom = {
+      ...room,
+      players: room.players.map((player) =>
+        player.id === raceState.playerId ? { ...player, carState } : player,
+      ),
+    };
+    multiplayerRoomsCache = { ...getStoredRooms(), [raceState.roomCode]: updatedRoom };
     raceState.players = updatedRoom.players;
   }
+  sendMultiplayerMessage({
+    type: "updatePlayerState",
+    roomCode: raceState.roomCode,
+    playerId: raceState.playerId,
+    carState,
+  });
 }
 
 function applyLocalMultiplayerIdentity() {
@@ -1760,28 +1771,32 @@ function exitPausedRace() {
   showMainMenu();
 }
 
-function returnToMultiplayerLobby() {
-  const updatedRoom = updateStoredRoom(raceState.roomCode, (room) => ({
-    ...room,
-    started: false,
-    startedAt: null,
-    players: resetRoomPlayersForGrid(room.players).map((player) => ({ ...player, ready: player.leader })),
-  }));
+async function returnToMultiplayerLobby() {
+  const room = getStoredRoom();
+  if (!room) {
+    showMainMenu();
+    return;
+  }
+  const result = await requestMultiplayerAction("resetLobby", {
+    roomCode: raceState.roomCode,
+    startStates: getMultiplayerStartStates(room.players),
+  });
 
-  if (!updatedRoom) {
+  if (!result.ok) {
     showMainMenu();
     return;
   }
 
   hideEndingScreen();
+  multiplayerRoomsCache = result.rooms ?? multiplayerRoomsCache;
   raceState.mode = "multiplayer";
   raceState.phase = "multiplayer-config";
-  raceState.players = updatedRoom.players;
+  raceState.players = result.room.players;
   raceState.isLeader = Boolean(getLocalPlayer()?.leader);
   resetRaceState();
   raceState.mode = "multiplayer";
   raceState.phase = "multiplayer-config";
-  raceState.players = updatedRoom.players;
+  raceState.players = result.room.players;
   raceState.isLeader = Boolean(getLocalPlayer()?.leader);
   multiplayerConfigForm.dataset.step = "lobby";
   multiplayerMessage.classList.remove("is-visible");
@@ -2025,18 +2040,28 @@ function finishMultiplayerRace() {
   playerControl.targetSteer = 0;
   playerCar.visible = false;
 
-  const updatedRoom = updateStoredRoom(raceState.roomCode, (room) => ({
-    ...room,
-    players: room.players.map((player) =>
-      player.id === raceState.playerId
-        ? { ...player, finished: true, finishTime: raceState.finishTime, carState: getPlayerCarState() }
-        : player,
-    ),
-  }));
-
-  if (updatedRoom) {
+  const carState = getPlayerCarState();
+  const room = getStoredRoom();
+  if (room) {
+    const updatedRoom = {
+      ...room,
+      players: room.players.map((player) =>
+        player.id === raceState.playerId
+          ? { ...player, finished: true, finishTime: raceState.finishTime, carState }
+          : player,
+      ),
+    };
+    multiplayerRoomsCache = { ...getStoredRooms(), [raceState.roomCode]: updatedRoom };
     raceState.players = updatedRoom.players;
   }
+  sendMultiplayerMessage({
+    type: "updatePlayerState",
+    roomCode: raceState.roomCode,
+    playerId: raceState.playerId,
+    carState,
+    finished: true,
+    finishTime: raceState.finishTime,
+  });
 
   renderRemotePlayerCars();
   const allFinished = raceState.players.length > 0 && raceState.players.every((player) => player.finished);
@@ -2142,8 +2167,12 @@ function getPlayerId() {
 }
 
 function getStoredRooms() {
+  if (Object.keys(multiplayerRoomsCache).length) {
+    return multiplayerRoomsCache;
+  }
   try {
-    return JSON.parse(localStorage.getItem(multiplayerStorageKey)) ?? {};
+    multiplayerRoomsCache = JSON.parse(localStorage.getItem(multiplayerStorageKey)) ?? {};
+    return multiplayerRoomsCache;
   } catch (error) {
     console.warn("Could not read multiplayer rooms:", error);
     return {};
@@ -2156,12 +2185,29 @@ function sendMultiplayerMessage(message) {
   return true;
 }
 
+function requestMultiplayerAction(type, payload = {}) {
+  const requestId = crypto.randomUUID?.() ?? `request-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  return new Promise((resolve) => {
+    if (!sendMultiplayerMessage({ type, requestId, ...payload })) {
+      resolve({ ok: false, message: "Multiplayer server is not connected." });
+      return;
+    }
+
+    const timeout = window.setTimeout(() => {
+      multiplayerPendingRequests.delete(requestId);
+      resolve({ ok: false, message: "Multiplayer server did not respond." });
+    }, 2500);
+    multiplayerPendingRequests.set(requestId, { resolve, timeout });
+  });
+}
+
 function registerMultiplayerSession() {
   if (!raceState.roomCode || !raceState.playerId || raceState.mode !== "multiplayer") return;
   sendMultiplayerMessage({ type: "registerPlayer", roomCode: raceState.roomCode, playerId: raceState.playerId });
 }
 
 function saveStoredRooms(rooms) {
+  multiplayerRoomsCache = rooms;
   localStorage.setItem(multiplayerStorageKey, JSON.stringify(rooms));
   multiplayerRoomChannel?.postMessage({ type: "rooms-updated" });
   sendMultiplayerMessage({ type: "saveRooms", rooms });
@@ -2197,6 +2243,10 @@ function resetRoomPlayersForGrid(players) {
     finishTime: null,
     carState: getMultiplayerStartPose(index),
   }));
+}
+
+function getMultiplayerStartStates(players) {
+  return Object.fromEntries(resetRoomPlayersForGrid(players).map((player) => [player.id, player.carState]));
 }
 
 function updateStoredRoom(roomCode, updater) {
@@ -2375,15 +2425,13 @@ function enterLobby({ roomCode, isLeader, players }) {
   renderRoomLobby();
 }
 
-function createMultiplayerRoom() {
+async function createMultiplayerRoom() {
   const playerName = getPlayerName();
   if (!playerName) {
     showMultiplayerMessage("Enter your name before creating a room.");
     return;
   }
   raceState.playerName = playerName;
-  const rooms = getStoredRooms();
-  const roomCode = createRoomCode(rooms);
   const leader = {
     id: getPlayerId(),
     name: raceState.playerName,
@@ -2391,9 +2439,13 @@ function createMultiplayerRoom() {
     leader: true,
     carState: getMultiplayerStartPose(0),
   };
-  rooms[roomCode] = { code: roomCode, players: [leader], started: false };
-  saveStoredRooms(rooms);
-  enterLobby({ roomCode, isLeader: true, players: rooms[roomCode].players });
+  const result = await requestMultiplayerAction("createRoom", { player: leader });
+  if (!result.ok) {
+    showMultiplayerMessage(result.message ?? "Could not create room.");
+    return;
+  }
+  multiplayerRoomsCache = result.rooms ?? multiplayerRoomsCache;
+  enterLobby({ roomCode: result.roomCode, isLeader: true, players: result.room.players });
 }
 
 function showJoinRoom() {
@@ -2446,7 +2498,7 @@ function handleMultiplayerBack() {
   showMainMenu();
 }
 
-function joinMultiplayerRoom() {
+async function joinMultiplayerRoom() {
   const playerName = raceState.playerName;
   const typedRoomCode = roomCodeInput.value.trim().toUpperCase();
   const roomCode = selectedLobbyCode || typedRoomCode;
@@ -2458,56 +2510,45 @@ function joinMultiplayerRoom() {
     showMultiplayerMessage("Enter your name before joining a room.");
     return;
   }
-  const room = getStoredRoom(roomCode);
-  if (!room) {
-    showMultiplayerMessage("Room code not found.");
-    renderAvailableLobbies();
-    return;
-  }
-  if (room.started) {
-    showMultiplayerMessage("Race already started.");
-    renderAvailableLobbies();
-    return;
-  }
   raceState.playerName = playerName;
   const playerId = getPlayerId();
-  const roomPlayers = normalizeRoomPlayers(room.players ?? []);
-  const isRejoiningPlayer = roomPlayers.some((player) => player.id === playerId);
-  if (!isRejoiningPlayer && roomPlayers.length >= maxMultiplayerPlayers) {
-    showMultiplayerMessage("Lobby full.");
-    renderAvailableLobbies();
-    return;
-  }
-  const updatedRoom = updateStoredRoom(roomCode, (currentRoom) => {
-    const players = currentRoom.players.filter((player) => player.id !== playerId);
-    players.push({
+  const result = await requestMultiplayerAction("joinRoom", {
+    roomCode,
+    player: {
       id: playerId,
       name: raceState.playerName,
       ready: false,
       leader: false,
-      carState: getMultiplayerStartPose(players.length),
-    });
-    return { ...currentRoom, players };
+      carState: getMultiplayerStartPose(0),
+    },
   });
-  enterLobby({ roomCode, isLeader: false, players: updatedRoom.players });
-  if (updatedRoom.started && updatedRoom.startedAt) {
-    beginSharedMultiplayerCountdown(updatedRoom.startedAt);
+  if (!result.ok) {
+    showMultiplayerMessage(result.message ?? "Could not join room.");
+    renderAvailableLobbies();
+    return;
+  }
+  multiplayerRoomsCache = result.rooms ?? multiplayerRoomsCache;
+  enterLobby({ roomCode: result.roomCode, isLeader: false, players: result.room.players });
+  if (result.room.started && result.room.startedAt) {
+    beginSharedMultiplayerCountdown(result.room.startedAt);
   }
 }
 
-function toggleReady() {
-  const updatedRoom = updateStoredRoom(raceState.roomCode, (room) => ({
-    ...room,
-    players: room.players.map((player) =>
-      player.id === raceState.playerId && !player.leader ? { ...player, ready: !player.ready } : player,
-    ),
-  }));
-  if (!updatedRoom) return;
-  raceState.players = updatedRoom.players;
+async function toggleReady() {
+  const result = await requestMultiplayerAction("toggleReady", {
+    roomCode: raceState.roomCode,
+    playerId: raceState.playerId,
+  });
+  if (!result.ok) {
+    showMultiplayerMessage(result.message ?? "Could not update ready state.");
+    return;
+  }
+  multiplayerRoomsCache = result.rooms ?? multiplayerRoomsCache;
+  raceState.players = result.room.players;
   renderRoomLobby();
 }
 
-function startConfiguredMultiplayer() {
+async function startConfiguredMultiplayer() {
   if (!raceState.isLeader) {
     showMultiplayerMessage("Only the room leader can start.");
     return;
@@ -2530,17 +2571,21 @@ function startConfiguredMultiplayer() {
     return;
   }
   const startedAt = Date.now();
-  const updatedRoom = updateStoredRoom(raceState.roomCode, (currentRoom) => ({
-    ...currentRoom,
-    started: true,
+  const result = await requestMultiplayerAction("startRace", {
+    roomCode: raceState.roomCode,
+    playerId: raceState.playerId,
     startedAt,
-    players: resetRoomPlayersForGrid(currentRoom.players),
-  }));
-  if (updatedRoom) {
-    raceState.players = updatedRoom.players;
-    applyLocalMultiplayerIdentity();
-    renderRemotePlayerCars();
+    startStates: getMultiplayerStartStates(room.players),
+  });
+  if (!result.ok) {
+    showMultiplayerMessage(result.message ?? "Could not start race.");
+    renderRoomLobby();
+    return;
   }
+  multiplayerRoomsCache = result.rooms ?? multiplayerRoomsCache;
+  raceState.players = result.room.players;
+  applyLocalMultiplayerIdentity();
+  renderRemotePlayerCars();
   beginSharedMultiplayerCountdown(startedAt);
 }
 
@@ -2651,8 +2696,23 @@ function connectMultiplayerServer() {
   socket.addEventListener("message", (event) => {
     try {
       const message = JSON.parse(event.data);
+      if (message.type === "actionResult") {
+        if (message.rooms) {
+          multiplayerRoomsCache = message.rooms;
+          localStorage.setItem(multiplayerStorageKey, JSON.stringify(multiplayerRoomsCache));
+        }
+        const pendingRequest = multiplayerPendingRequests.get(message.requestId);
+        if (pendingRequest) {
+          window.clearTimeout(pendingRequest.timeout);
+          multiplayerPendingRequests.delete(message.requestId);
+          pendingRequest.resolve(message);
+        }
+        syncCurrentRoom();
+        return;
+      }
       if (message.type !== "rooms") return;
-      localStorage.setItem(multiplayerStorageKey, JSON.stringify(message.rooms ?? {}));
+      multiplayerRoomsCache = message.rooms ?? {};
+      localStorage.setItem(multiplayerStorageKey, JSON.stringify(multiplayerRoomsCache));
       syncCurrentRoom();
     } catch (error) {
       console.warn("Could not sync multiplayer rooms:", error);
@@ -2661,6 +2721,11 @@ function connectMultiplayerServer() {
 
   socket.addEventListener("close", () => {
     multiplayerSocketConnected = false;
+    multiplayerPendingRequests.forEach((pendingRequest) => {
+      window.clearTimeout(pendingRequest.timeout);
+      pendingRequest.resolve({ ok: false, message: "Multiplayer server disconnected." });
+    });
+    multiplayerPendingRequests.clear();
     if (multiplayerSocket === socket) {
       window.setTimeout(connectMultiplayerServer, 1800);
     }
@@ -3302,6 +3367,11 @@ window.addEventListener("keydown", (event) => {
 multiplayerRoomChannel?.addEventListener("message", syncCurrentRoom);
 window.addEventListener("storage", (event) => {
   if (event.key === multiplayerStorageKey) {
+    try {
+      multiplayerRoomsCache = JSON.parse(event.newValue) ?? {};
+    } catch {
+      multiplayerRoomsCache = {};
+    }
     syncCurrentRoom();
   }
 });
