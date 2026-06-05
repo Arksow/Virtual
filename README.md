@@ -4,6 +4,21 @@
 
 Deploy the `RacingGame` branch to a Node web service so everyone opens the same public HTTPS URL. The server serves the game and the multiplayer WebSocket together.
 
+## GitHub Pages web link
+
+This repo includes a GitHub Actions workflow that builds the frontend and deploys it to GitHub Pages whenever the `RacingGame` branch is pushed.
+
+1. In GitHub, open **Settings > Pages**.
+2. Set **Source** to **GitHub Actions**.
+3. Push to the `RacingGame` branch.
+4. Open:
+
+   ```text
+   https://arksow.github.io/Virtual/
+   ```
+
+GitHub Pages can only host the frontend files. Full multiplayer needs the Node backend from the Render setup below.
+
 ### Render setup
 
 1. Push this repo to GitHub.

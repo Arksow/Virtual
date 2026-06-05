@@ -86,6 +86,11 @@ const raycaster = new THREE.Raycaster();
 const pointer = new THREE.Vector2();
 let hoveredCar = null;
 
+function updateAppViewportSize() {
+  const viewportHeight = window.visualViewport?.height ?? window.innerHeight;
+  document.documentElement.style.setProperty("--app-height", `${viewportHeight}px`);
+}
+
 function getRaceClockTime() {
   return performance.now() / 1000;
 }
@@ -254,7 +259,7 @@ const multiplayerCarColors = [
   [0x6de7ff, 0x10202a],
 ];
 const carModelRotationOffset = Math.PI;
-const f1ModelPath = "/models/ModelCar.fbx";
+const f1ModelPath = `${import.meta.env.BASE_URL}models/ModelCar.fbx`;
 const f1ModelScale = 0.015;
 const multiplayerStorageKey = "ridgeway-arena-multiplayer-rooms";
 const multiplayerRoomChannel =
@@ -3462,12 +3467,17 @@ function animate() {
 }
 
 window.addEventListener("resize", () => {
-  camera.aspect = window.innerWidth / window.innerHeight;
+  updateAppViewportSize();
+  const viewportWidth = window.visualViewport?.width ?? window.innerWidth;
+  const viewportHeight = window.visualViewport?.height ?? window.innerHeight;
+  camera.aspect = viewportWidth / viewportHeight;
   camera.updateProjectionMatrix();
-  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.setSize(viewportWidth, viewportHeight);
   updateCarHoverLabel();
   updateCarNameLabels();
 });
+window.visualViewport?.addEventListener("resize", updateAppViewportSize);
 
 setCameraMode("map");
+updateAppViewportSize();
 animate();
