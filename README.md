@@ -1,5 +1,22 @@
 # Virtual
 
+## Online multiplayer without a host laptop
+
+Deploy the `RacingGame` branch to a Node web service so everyone opens the same public HTTPS URL. The server serves the game and the multiplayer WebSocket together.
+
+### Render setup
+
+1. Push this repo to GitHub.
+2. In Render, create a new **Blueprint** or **Web Service** from the repo.
+3. Use these settings if Render does not read `render.yaml` automatically:
+   - Build command: `npm ci && npm run build`
+   - Start command: `npm start`
+   - Environment variable: `NODE_ENV=production`
+4. Open the Render HTTPS URL on every laptop.
+5. Use Multiplayer normally. One player creates a room and the others join from the lobby list or room code.
+
+Important: the backend keeps rooms in memory. If the hosting service restarts or sleeps, active rooms reset. For a classroom/demo game this is usually fine; for permanent rooms, add a database later.
+
 ## LAN multiplayer
 
 Use this mode when another laptop should join the same multiplayer room.

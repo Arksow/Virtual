@@ -1,14 +1,29 @@
 import { networkInterfaces } from "node:os";
+import { readFile, stat } from "node:fs/promises";
 import { createServer as createHttpServer } from "node:http";
-import basicSsl from "@vitejs/plugin-basic-ssl";
-import { createServer as createViteServer } from "vite";
+import { extname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { WebSocketServer } from "ws";
 
+const projectRoot = fileURLToPath(new URL(".", import.meta.url));
+const distRoot = resolve(projectRoot, "dist");
 const host = process.env.HOST ?? "0.0.0.0";
 const httpPort = Number(process.env.HTTP_PORT ?? 5173);
 const httpsPort = Number(process.env.HTTPS_PORT ?? 5174);
+const productionPort = Number(process.env.PORT ?? httpsPort);
+const isProduction = process.env.NODE_ENV === "production" || Boolean(process.env.PORT);
 const maxPlayersPerRoom = 5;
 const rooms = {};
+const mimeTypes = {
+  ".css": "text/css",
+  ".fbx": "application/octet-stream",
+  ".html": "text/html",
+  ".js": "text/javascript",
+  ".json": "application/json",
+  ".png": "image/png",
+  ".svg": "image/svg+xml",
+  ".wasm": "application/wasm",
+};
 
 function createRoomCode() {
   let code = "";
@@ -322,6 +337,26 @@ function handleMessage(wss, socket, event) {
   }
 }
 
+function attachMultiplayerServer(server) {
+  const wss = new WebSocketServer({ server, path: "/multiplayer" });
+  wss.on("connection", (socket) => {
+    send(socket, { type: "rooms", rooms });
+    socket.on("message", (event) => {
+      try {
+        handleMessage(wss, socket, event);
+      } catch (error) {
+        send(socket, { type: "error", message: "Invalid multiplayer message." });
+      }
+    });
+    socket.on("close", () => {
+      if (removePlayerFromRoom(socket.roomCode, socket.playerId)) {
+        broadcastRooms(wss);
+      }
+    });
+  });
+  return wss;
+}
+
 function getNetworkIps() {
   return Object.values(networkInterfaces())
     .flat()
@@ -329,51 +364,93 @@ function getNetworkIps() {
     .map((network) => network.address);
 }
 
-const vite = await createViteServer({
-  plugins: [basicSsl()],
-  server: {
-    host,
-    port: httpsPort,
-    strictPort: true,
-    https: true,
-  },
-});
+async function serveStaticFile(request, response) {
+  const requestUrl = new URL(request.url ?? "/", "http://localhost");
+  let pathname = decodeURIComponent(requestUrl.pathname);
+  if (pathname === "/") pathname = "/index.html";
 
-await vite.listen();
-vite.printUrls();
+  const requestedPath = resolve(distRoot, `.${pathname}`);
+  if (!requestedPath.startsWith(distRoot)) {
+    response.writeHead(403);
+    response.end("Forbidden");
+    return;
+  }
 
-const wss = new WebSocketServer({ server: vite.httpServer, path: "/multiplayer" });
-wss.on("connection", (socket) => {
-  send(socket, { type: "rooms", rooms });
-  socket.on("message", (event) => {
-    try {
-      handleMessage(wss, socket, event);
-    } catch (error) {
-      send(socket, { type: "error", message: "Invalid multiplayer message." });
+  let filePath = requestedPath;
+  try {
+    const fileStat = await stat(filePath);
+    if (fileStat.isDirectory()) {
+      filePath = join(filePath, "index.html");
     }
-  });
-  socket.on("close", () => {
-    if (removePlayerFromRoom(socket.roomCode, socket.playerId)) {
-      broadcastRooms(wss);
-    }
-  });
-});
+  } catch {
+    filePath = extname(pathname) ? requestedPath : join(distRoot, "index.html");
+  }
 
-const redirectServer = createHttpServer((request, response) => {
-  const requestHost = request.headers.host?.split(":")[0] ?? "localhost";
-  response.writeHead(302, {
-    Location: `https://${requestHost}:${httpsPort}${request.url ?? "/"}`,
-  });
-  response.end();
-});
+  try {
+    const body = await readFile(filePath);
+    response.writeHead(200, {
+      "Content-Type": mimeTypes[extname(filePath)] ?? "application/octet-stream",
+      "Cache-Control": filePath.endsWith("index.html") ? "no-cache" : "public, max-age=31536000, immutable",
+    });
+    response.end(body);
+  } catch {
+    response.writeHead(404);
+    response.end("Not found");
+  }
+}
 
-redirectServer.listen(httpPort, host, () => {
-  console.log("\nLAN multiplayer is ready.");
-  console.log(`Open the game on this laptop: https://localhost:${httpsPort}`);
-  console.log("Open the game on other laptops using one of these:");
-  getNetworkIps().forEach((ip) => {
-    console.log(`  https://${ip}:${httpsPort}`);
-    console.log(`  http://${ip}:${httpPort}  -> redirects to HTTPS`);
+async function startProductionServer() {
+  const appServer = createHttpServer((request, response) => {
+    void serveStaticFile(request, response);
   });
-  console.log("\nUse the Wi-Fi IP address. Do not use 192.168.56.1 unless the other laptop is on that same virtual network.");
-});
+  attachMultiplayerServer(appServer);
+  appServer.listen(productionPort, host, () => {
+    console.log(`Racing Arena multiplayer server is running on port ${productionPort}.`);
+  });
+}
+
+async function startLanDevServer() {
+  const [{ default: basicSsl }, { createServer: createViteServer }] = await Promise.all([
+    import("@vitejs/plugin-basic-ssl"),
+    import("vite"),
+  ]);
+
+  const vite = await createViteServer({
+    plugins: [basicSsl()],
+    server: {
+      host,
+      port: httpsPort,
+      strictPort: true,
+      https: true,
+    },
+  });
+
+  await vite.listen();
+  vite.printUrls();
+  attachMultiplayerServer(vite.httpServer);
+
+  const redirectServer = createHttpServer((request, response) => {
+    const requestHost = request.headers.host?.split(":")[0] ?? "localhost";
+    response.writeHead(302, {
+      Location: `https://${requestHost}:${httpsPort}${request.url ?? "/"}`,
+    });
+    response.end();
+  });
+
+  redirectServer.listen(httpPort, host, () => {
+    console.log("\nLAN multiplayer is ready.");
+    console.log(`Open the game on this laptop: https://localhost:${httpsPort}`);
+    console.log("Open the game on other laptops using one of these:");
+    getNetworkIps().forEach((ip) => {
+      console.log(`  https://${ip}:${httpsPort}`);
+      console.log(`  http://${ip}:${httpPort}  -> redirects to HTTPS`);
+    });
+    console.log("\nUse the Wi-Fi IP address. Do not use 192.168.56.1 unless the other laptop is on that same virtual network.");
+  });
+}
+
+if (isProduction) {
+  await startProductionServer();
+} else {
+  await startLanDevServer();
+}
