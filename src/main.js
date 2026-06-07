@@ -2688,8 +2688,10 @@ function updateSingleplayerAiCars(delta) {
 function connectMultiplayerServer() {
   if (!("WebSocket" in window)) return;
 
+  const configuredMultiplayerUrl = import.meta.env.VITE_MULTIPLAYER_URL?.trim();
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-  const socket = new WebSocket(`${protocol}//${window.location.host}/multiplayer`);
+  const multiplayerUrl = configuredMultiplayerUrl || `${protocol}//${window.location.host}/multiplayer`;
+  const socket = new WebSocket(multiplayerUrl);
   multiplayerSocket = socket;
 
   socket.addEventListener("open", () => {

@@ -19,6 +19,35 @@ This repo includes a GitHub Actions workflow that builds the frontend and deploy
 
 GitHub Pages can only host the frontend files. Full multiplayer needs the Node backend from the Render setup below.
 
+## itch.io WebGL upload with multiplayer
+
+itch.io can host the WebGL/frontend ZIP, but it cannot run this game's Node multiplayer backend. Deploy the backend first using Render, then point the itch build at that backend.
+
+1. Deploy the backend using the Render setup below.
+2. Copy `.env.itch.example` to `.env.itch`.
+3. Replace the example value with your Render WebSocket URL:
+
+   ```text
+   VITE_MULTIPLAYER_URL=wss://YOUR-RENDER-APP.onrender.com/multiplayer
+   ```
+
+4. Build the itch.io version:
+
+   ```bash
+   npm run build:itch
+   ```
+
+5. Create the upload ZIP:
+
+   ```powershell
+   npm run package:itch
+   ```
+
+6. Upload `release/racing-arena-itch.zip` to itch.io.
+7. In itch.io, set the project kind to **HTML** and enable **This file will be played in the browser**.
+
+Players should all open the itch.io page. Multiplayer rooms will be shared through the hosted backend URL from `.env.itch`.
+
 ### Render setup
 
 1. Push this repo to GitHub.
