@@ -11,6 +11,7 @@ const handOverlayContext = handOverlay.getContext("2d");
 const handCursor = document.querySelector("#hand-cursor");
 const webcamStartButton = document.querySelector("#webcam-start");
 const webcamStopButton = document.querySelector("#webcam-stop");
+const webcamEnableButton = document.querySelector("#webcam-enable");
 const webcamStatus = document.querySelector("#webcam-status");
 const webcamPanel = document.querySelector(".webcam-panel");
 const webcamMessage = document.querySelector("#webcam-message");
@@ -2105,7 +2106,8 @@ function beginCountdown(mode = "singleplayer") {
   setCameraMode("chase");
   setHandStatus("starting");
   if (!webcamStream) {
-    void startWebcam();
+    setWebcamState("idle", "Enable camera for controls");
+    setHandStatus("tap enable camera");
   }
   updateGameUi();
   updateCheckpointVisibility();
@@ -2124,7 +2126,8 @@ function beginSharedMultiplayerCountdown(startedAt) {
   setCameraMode("chase");
   setHandStatus("starting");
   if (!webcamStream) {
-    void startWebcam();
+    setWebcamState("idle", "Enable camera for controls");
+    setHandStatus("tap enable camera");
   }
   updateGameUi();
   updateCheckpointVisibility();
@@ -2769,7 +2772,7 @@ resetPlayerAtStart();
 const webcamStates = {
   idle: {
     status: "Off",
-    message: "Ready",
+    message: "Tap Enable camera",
     canStart: true,
     canStop: false,
   },
@@ -2787,7 +2790,7 @@ const webcamStates = {
   },
   denied: {
     status: "Blocked",
-    message: "Camera permission denied.",
+    message: "Camera blocked in browser settings.",
     canStart: true,
     canStop: false,
   },
@@ -2822,6 +2825,10 @@ function setWebcamState(state, messageOverride) {
   webcamPanel.dataset.state = state;
   webcamStatus.textContent = nextState.status;
   webcamMessage.textContent = messageOverride ?? nextState.message;
+  if (webcamEnableButton) {
+    webcamEnableButton.hidden = !nextState.canStart;
+    webcamEnableButton.disabled = !nextState.canStart;
+  }
   if (webcamStartButton) {
     webcamStartButton.disabled = !nextState.canStart;
     webcamStartButton.classList.toggle("active", nextState.canStart);
@@ -3253,9 +3260,10 @@ function stopHandTracking() {
 async function startWebcam() {
   if (!navigator.mediaDevices?.getUserMedia) {
     setWebcamState("unavailable");
-    return;
+    return false;
   }
-  if (webcamStream || isWebcamStarting) return;
+  if (webcamStream) return true;
+  if (isWebcamStarting) return false;
 
   isWebcamStarting = true;
   setWebcamState("loading", "Waiting for camera permission...");
@@ -3287,13 +3295,23 @@ async function startWebcam() {
     }
 
     setWebcamState("live");
+    return true;
   } catch (error) {
     console.warn("Webcam access failed:", error);
     stopWebcam({ preserveState: true });
     setWebcamState(getWebcamErrorState(error));
+    return false;
   } finally {
     isWebcamStarting = false;
   }
+}
+
+async function requestDriverCamera() {
+  const started = await startWebcam();
+  if (!started && !webcamStream) {
+    setHandStatus("camera needed");
+  }
+  return started;
 }
 
 function stopWebcam(options = {}) {
@@ -3307,16 +3325,22 @@ function stopWebcam(options = {}) {
   }
 }
 
-webcamStartButton?.addEventListener("click", startWebcam);
+webcamStartButton?.addEventListener("click", requestDriverCamera);
+webcamEnableButton?.addEventListener("click", requestDriverCamera);
 webcamStopButton?.addEventListener("click", stopWebcam);
 window.addEventListener("beforeunload", () => {
   leaveLobbyIfNeeded();
   stopWebcam();
 });
+window.addEventListener("pagehide", () => {
+  stopWebcam();
+});
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "hidden") {
+    stopWebcam();
+  }
+});
 setWebcamState("idle");
-if (raceState.phase === "menu") {
-  void startWebcam();
-}
 
 let cameraMode = "map";
 function setCameraMode(mode) {
@@ -3336,10 +3360,17 @@ document.querySelectorAll("[data-camera]").forEach((button) => {
   });
 });
 raceModeButtons.forEach((button) => {
-  button.addEventListener("click", () => {
+  button.addEventListener("click", async () => {
     if (button.dataset.menuMode === "multiplayer") {
       showMultiplayerConfig();
+      if (!webcamStream) {
+        setWebcamState("idle", "Enable camera before ready");
+      }
       return;
+    }
+    if (!webcamStream) {
+      const cameraReady = await requestDriverCamera();
+      if (!cameraReady) return;
     }
     beginCountdown(button.dataset.menuMode);
   });
@@ -3361,8 +3392,20 @@ roomCodeInput.addEventListener("input", () => {
   multiplayerMessage.classList.remove("is-visible");
   renderAvailableLobbies();
 });
-readyToggleButton.addEventListener("click", toggleReady);
-startMultiplayerButton.addEventListener("click", startConfiguredMultiplayer);
+readyToggleButton.addEventListener("click", async () => {
+  if (!webcamStream) {
+    const cameraReady = await requestDriverCamera();
+    if (!cameraReady) return;
+  }
+  toggleReady();
+});
+startMultiplayerButton.addEventListener("click", async () => {
+  if (!webcamStream) {
+    const cameraReady = await requestDriverCamera();
+    if (!cameraReady) return;
+  }
+  startConfiguredMultiplayer();
+});
 multiplayerBackButton.addEventListener("click", handleMultiplayerBack);
 resultsMainMenuButton.addEventListener("click", showMainMenu);
 resultsReturnButton.addEventListener("click", returnToMultiplayerLobby);

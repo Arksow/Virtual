@@ -1270,7 +1270,7 @@ body:not([data-race-phase="racing"]) .current-place-stat,
 
 .webcam-message {
   position: absolute;
-  inset: auto 6px 6px;
+  inset: auto 6px 44px;
   margin: 0;
   padding: 6px 7px;
   border-radius: 6px;
@@ -1282,6 +1282,27 @@ body:not([data-race-phase="racing"]) .current-place-stat,
 }
 
 .webcam-panel[data-state="live"] .webcam-message {
+  display: none;
+}
+
+.webcam-enable-button {
+  position: absolute;
+  left: 6px;
+  right: 6px;
+  bottom: 6px;
+  display: grid;
+  place-items: center;
+  min-height: 34px;
+  border: 1px solid rgba(215, 248, 110, 0.72);
+  border-radius: 8px;
+  color: #12140f;
+  background: rgba(215, 248, 110, 0.94);
+  font-size: 0.72rem;
+  font-weight: 950;
+  cursor: pointer;
+}
+
+.webcam-enable-button[hidden] {
   display: none;
 }
 
@@ -1719,6 +1740,16 @@ h1 {
   .webcam-message {
     inset: auto 4px 4px;
     padding: 5px;
+    font-size: 0.62rem;
+  }
+
+  .webcam-panel:not([data-state="live"]) .webcam-message {
+    display: none;
+  }
+
+  .webcam-enable-button {
+    inset: auto 4px 4px;
+    min-height: 32px;
     font-size: 0.62rem;
   }
 
