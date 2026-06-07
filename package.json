@@ -9,7 +9,9 @@
     "build": "vite build",
     "build:pages": "vite build --base=/Virtual/",
     "build:itch": "vite build --mode itch --base=./",
-    "package:itch": "powershell -ExecutionPolicy Bypass -File scripts/package-itch.ps1",
+    "copy-env:itch": "node scripts/itch.mjs copy-env",
+    "package:itch": "node scripts/itch.mjs package",
+    "upload:itch": "node scripts/itch.mjs upload",
     "preview": "vite preview --host 127.0.0.1",
     "start": "node server.js"
   },
