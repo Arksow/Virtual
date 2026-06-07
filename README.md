@@ -29,7 +29,7 @@ npm run dev:lan
 The terminal will show local network URLs. Other laptops should open the Wi-Fi IP URL shown there, for example:
 
 ```text
-http://192.168.1.124:5173
+https://192.168.0.125:5174/
 ```
 
 The browser may redirect to HTTPS and show a privacy warning because the local certificate is self-signed. Continue through the warning so camera permissions can work.
