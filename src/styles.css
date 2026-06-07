@@ -374,8 +374,19 @@ body[data-race-mode="singleplayer"][data-race-phase="racing"] .pause-open-button
 .pause-panel,
 .available-lobby-list,
 .room-player-list {
+  scrollbar-width: none;
   -webkit-overflow-scrolling: touch;
   touch-action: pan-y;
+}
+
+.game-menu-card::-webkit-scrollbar,
+.multiplayer-config[data-step="join"]::-webkit-scrollbar,
+.help-panel::-webkit-scrollbar,
+.ending-panel::-webkit-scrollbar,
+.pause-panel::-webkit-scrollbar,
+.available-lobby-list::-webkit-scrollbar,
+.room-player-list::-webkit-scrollbar {
+  display: none;
 }
 
 .available-lobbies {
