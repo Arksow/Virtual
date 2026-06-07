@@ -4,21 +4,6 @@
 
 Deploy the `RacingGame` branch to a Node web service so everyone opens the same public HTTPS URL. The server serves the game and the multiplayer WebSocket together.
 
-## GitHub Pages web link
-
-This repo includes a GitHub Actions workflow that builds the frontend and deploys it to GitHub Pages whenever the `RacingGame` branch is pushed.
-
-1. In GitHub, open **Settings > Pages**.
-2. Set **Source** to **GitHub Actions**.
-3. Push to the `RacingGame` branch.
-4. Open:
-
-   ```text
-   https://arksow.github.io/Virtual/
-   ```
-
-GitHub Pages can only host the frontend files. Full multiplayer needs the Node backend from the Render setup below.
-
 ## itch.io WebGL upload with multiplayer
 
 itch.io can host the WebGL/frontend ZIP, but it cannot run this game's Node multiplayer backend. Deploy the backend first using Render, then point the itch build at that backend.
@@ -43,10 +28,14 @@ itch.io can host the WebGL/frontend ZIP, but it cannot run this game's Node mult
    npm run package:itch
    ```
 
+   The packaging script creates an itch-safe build by inlining the generated CSS and JavaScript into `index.html`. This avoids the plain unstyled button screen when itch's iframe does not load the built asset links correctly.
+
 5. Manual upload option:
    - Upload `release/racing-arena-itch.zip` to itch.io.
    - Set the project kind to **HTML**.
    - Enable **This file will be played in the browser**.
+   - If you previously uploaded an older ZIP and saw plain white buttons on a black screen, delete or replace that file with the newly generated ZIP.
+   - Use a larger viewport such as `960 x 540` or `1280 x 720` for the best game layout.
 
 6. JavaScript upload option with Butler:
    - Install itch.io Butler and login once.

@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, rmSync } from "node:fs";
-import { copyFile, readFile } from "node:fs/promises";
+import { copyFile, readFile, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
@@ -64,6 +64,58 @@ function createZip() {
 async function buildItch() {
   const env = await readItchEnv();
   run(process.execPath, [viteBinPath, "build", "--mode", "itch", "--base=./"], { env });
+  await inlineItchIndex();
+}
+
+async function inlineItchIndex() {
+  const indexPath = join(distPath, "index.html");
+  let html = await readFile(indexPath, "utf8");
+
+  html = await inlineStylesheets(html);
+  html = await inlineModuleScripts(html);
+
+  await writeFile(indexPath, html);
+  console.log("Inlined itch.io CSS and JavaScript into dist/index.html");
+}
+
+async function inlineStylesheets(html) {
+  const stylesheetPattern = /<link\b[^>]*rel=["']stylesheet["'][^>]*href=["']([^"']+)["'][^>]*>/gi;
+  const replacements = [];
+
+  for (const match of html.matchAll(stylesheetPattern)) {
+    const [tag, href] = match;
+    const assetPath = resolveDistAsset(href);
+    const css = await readFile(assetPath, "utf8");
+    replacements.push([tag, `<style>\n${css}\n</style>`]);
+  }
+
+  return applyReplacements(html, replacements);
+}
+
+async function inlineModuleScripts(html) {
+  const scriptPattern = /<script\b(?=[^>]*type=["']module["'])(?=[^>]*src=["']([^"']+)["'])[^>]*><\/script>/gi;
+  const replacements = [];
+
+  for (const match of html.matchAll(scriptPattern)) {
+    const [tag, src] = match;
+    const assetPath = resolveDistAsset(src);
+    const js = (await readFile(assetPath, "utf8")).replaceAll("</script", "<\\/script");
+    replacements.push([tag, `<script type="module">\n${js}\n</script>`]);
+  }
+
+  return applyReplacements(html, replacements);
+}
+
+function resolveDistAsset(assetUrl) {
+  const cleanUrl = assetUrl.split("?")[0].replace(/^\.\//, "");
+  if (cleanUrl.startsWith("/") || cleanUrl.includes("..")) {
+    throw new Error(`Refusing to inline unexpected asset path: ${assetUrl}`);
+  }
+  return join(distPath, cleanUrl);
+}
+
+function applyReplacements(value, replacements) {
+  return replacements.reduce((current, [from, to]) => current.replace(from, to), value);
 }
 
 async function packageItch() {
