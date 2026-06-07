@@ -2106,8 +2106,7 @@ function beginCountdown(mode = "singleplayer") {
   setCameraMode("chase");
   setHandStatus("starting");
   if (!webcamStream) {
-    setWebcamState("idle", "Enable camera for controls");
-    setHandStatus("tap enable camera");
+    setHandStatus("waiting for driver cam");
   }
   updateGameUi();
   updateCheckpointVisibility();
@@ -2126,8 +2125,7 @@ function beginSharedMultiplayerCountdown(startedAt) {
   setCameraMode("chase");
   setHandStatus("starting");
   if (!webcamStream) {
-    setWebcamState("idle", "Enable camera for controls");
-    setHandStatus("tap enable camera");
+    setHandStatus("waiting for driver cam");
   }
   updateGameUi();
   updateCheckpointVisibility();
@@ -2772,7 +2770,7 @@ resetPlayerAtStart();
 const webcamStates = {
   idle: {
     status: "Off",
-    message: "Tap Enable camera",
+    message: "Ready",
     canStart: true,
     canStop: false,
   },
@@ -3332,15 +3330,10 @@ window.addEventListener("beforeunload", () => {
   leaveLobbyIfNeeded();
   stopWebcam();
 });
-window.addEventListener("pagehide", () => {
-  stopWebcam();
-});
-document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "hidden") {
-    stopWebcam();
-  }
-});
 setWebcamState("idle");
+if (raceState.phase === "menu") {
+  void startWebcam();
+}
 
 let cameraMode = "map";
 function setCameraMode(mode) {
@@ -3360,7 +3353,7 @@ document.querySelectorAll("[data-camera]").forEach((button) => {
   });
 });
 raceModeButtons.forEach((button) => {
-  button.addEventListener("click", async () => {
+  button.addEventListener("click", () => {
     if (button.dataset.menuMode === "multiplayer") {
       showMultiplayerConfig();
       if (!webcamStream) {
@@ -3369,8 +3362,7 @@ raceModeButtons.forEach((button) => {
       return;
     }
     if (!webcamStream) {
-      const cameraReady = await requestDriverCamera();
-      if (!cameraReady) return;
+      void requestDriverCamera();
     }
     beginCountdown(button.dataset.menuMode);
   });
@@ -3394,15 +3386,13 @@ roomCodeInput.addEventListener("input", () => {
 });
 readyToggleButton.addEventListener("click", async () => {
   if (!webcamStream) {
-    const cameraReady = await requestDriverCamera();
-    if (!cameraReady) return;
+    await requestDriverCamera();
   }
   toggleReady();
 });
 startMultiplayerButton.addEventListener("click", async () => {
   if (!webcamStream) {
-    const cameraReady = await requestDriverCamera();
-    if (!cameraReady) return;
+    await requestDriverCamera();
   }
   startConfiguredMultiplayer();
 });
