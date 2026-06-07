@@ -56,9 +56,25 @@ const readyToggleButton = document.querySelector("#ready-toggle");
 const startMultiplayerButton = document.querySelector("#start-multiplayer");
 const leaderWaitingMessage = document.querySelector("#leader-waiting");
 
+function getAppViewportSize() {
+  const viewportWidth = window.visualViewport?.width ?? window.innerWidth;
+  const viewportHeight = window.visualViewport?.height ?? window.innerHeight;
+  return {
+    width: Math.max(1, Math.round(canvas.parentElement?.clientWidth || viewportWidth)),
+    height: Math.max(1, Math.round(window.visualViewport?.height || canvas.parentElement?.clientHeight || viewportHeight)),
+  };
+}
+
+function updateAppViewportSize() {
+  const { height } = getAppViewportSize();
+  document.documentElement.style.setProperty("--app-height", `${height}px`);
+}
+
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-renderer.setSize(window.innerWidth, window.innerHeight);
+updateAppViewportSize();
+const initialViewportSize = getAppViewportSize();
+renderer.setSize(initialViewportSize.width, initialViewportSize.height);
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -69,7 +85,7 @@ const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x93b4cf);
 scene.fog = new THREE.Fog(0x93b4cf, 260, 700);
 
-const camera = new THREE.PerspectiveCamera(48, window.innerWidth / window.innerHeight, 0.1, 600);
+const camera = new THREE.PerspectiveCamera(48, initialViewportSize.width / initialViewportSize.height, 0.1, 600);
 camera.position.set(0, 265, 0.1);
 
 const controls = new OrbitControls(camera, renderer.domElement);
@@ -85,11 +101,6 @@ scene.add(world);
 const raycaster = new THREE.Raycaster();
 const pointer = new THREE.Vector2();
 let hoveredCar = null;
-
-function updateAppViewportSize() {
-  const viewportHeight = window.visualViewport?.height ?? window.innerHeight;
-  document.documentElement.style.setProperty("--app-height", `${viewportHeight}px`);
-}
 
 function getRaceClockTime() {
   return performance.now() / 1000;
@@ -3470,15 +3481,25 @@ function animate() {
 
 window.addEventListener("resize", () => {
   updateAppViewportSize();
-  const viewportWidth = window.visualViewport?.width ?? window.innerWidth;
-  const viewportHeight = window.visualViewport?.height ?? window.innerHeight;
-  camera.aspect = viewportWidth / viewportHeight;
+  const { width, height } = getAppViewportSize();
+  camera.aspect = width / height;
   camera.updateProjectionMatrix();
-  renderer.setSize(viewportWidth, viewportHeight);
+  renderer.setSize(width, height);
   updateCarHoverLabel();
   updateCarNameLabels();
 });
 window.visualViewport?.addEventListener("resize", updateAppViewportSize);
+window.addEventListener("orientationchange", () => {
+  window.setTimeout(() => {
+    updateAppViewportSize();
+    const { width, height } = getAppViewportSize();
+    camera.aspect = width / height;
+    camera.updateProjectionMatrix();
+    renderer.setSize(width, height);
+    updateCarHoverLabel();
+    updateCarNameLabels();
+  }, 150);
+});
 
 setCameraMode("map");
 updateAppViewportSize();
