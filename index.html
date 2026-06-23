@@ -2,203 +2,45 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content" />
-    <title>Ridgeway Arena Track</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Memory Sequence</title>
   </head>
   <body>
-    <main id="app">
-      <canvas id="scene"></canvas>
-      <section id="game-menu" class="game-menu" data-state="menu" aria-label="Race start">
-        <button id="help-open" class="help-open-button" type="button" aria-label="Show controls help">?</button>
-        <div class="game-menu-card">
-          <h1 class="game-title">RACING ARENA</h1>
-          <div class="menu-actions">
-            <button class="race-start-button" type="button" data-menu-mode="singleplayer">Singleplayer</button>
-            <button class="race-start-button secondary" type="button" data-menu-mode="multiplayer">Multiplayer</button>
+    <main class="game-shell">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">Team memory challenge</p>
+          <h1>MEMORY<br /><span>SEQUENCE</span></h1>
+        </div>
+        <div class="sequence-strip" id="sequence-strip" aria-label="Sequence progress"></div>
+        <div class="round-badge">ROUND <strong id="round">01</strong></div>
+      </header>
+
+      <section class="game-layout">
+        <aside class="team-panel">
+          <p class="panel-label">YOUR CREW</p>
+          <div class="team-size" role="group" aria-label="Team size">
+            <button class="size-button" data-size="2">2</button><button class="size-button active" data-size="3">3</button><button class="size-button" data-size="4">4</button><button class="size-button" data-size="5">5</button><button class="size-button" data-size="6">6</button>
           </div>
-          <form id="multiplayer-config" class="multiplayer-config" aria-label="Multiplayer setup">
-            <p id="multiplayer-message" class="multiplayer-message" role="status"></p>
-            <label id="player-name-field">
-              Player name
-              <input id="player-name" name="playerName" type="text" maxlength="18" value="Player 1" autocomplete="off" />
-            </label>
-            <div class="multiplayer-actions">
-              <button id="create-room" class="race-start-button" type="button">Create Room</button>
-              <button id="show-join-room" class="race-start-button secondary" type="button">Join Room</button>
-            </div>
-            <label id="join-room-field" class="join-room-field">
-              Room code
-              <input id="room-code" name="roomCode" type="text" maxlength="12" autocomplete="off" />
-            </label>
-            <div id="room-code-keyboard" class="room-code-keyboard" aria-label="Room code keyboard">
-              <button type="button" data-room-key="A">A</button>
-              <button type="button" data-room-key="B">B</button>
-              <button type="button" data-room-key="C">C</button>
-              <button type="button" data-room-key="D">D</button>
-              <button type="button" data-room-key="E">E</button>
-              <button type="button" data-room-key="F">F</button>
-              <button type="button" data-room-key="G">G</button>
-              <button type="button" data-room-key="H">H</button>
-              <button type="button" data-room-key="I">I</button>
-              <button type="button" data-room-key="J">J</button>
-              <button type="button" data-room-key="K">K</button>
-              <button type="button" data-room-key="L">L</button>
-              <button type="button" data-room-key="M">M</button>
-              <button type="button" data-room-key="N">N</button>
-              <button type="button" data-room-key="O">O</button>
-              <button type="button" data-room-key="P">P</button>
-              <button type="button" data-room-key="Q">Q</button>
-              <button type="button" data-room-key="R">R</button>
-              <button type="button" data-room-key="S">S</button>
-              <button type="button" data-room-key="T">T</button>
-              <button type="button" data-room-key="U">U</button>
-              <button type="button" data-room-key="V">V</button>
-              <button type="button" data-room-key="W">W</button>
-              <button type="button" data-room-key="X">X</button>
-              <button type="button" data-room-key="Y">Y</button>
-              <button type="button" data-room-key="Z">Z</button>
-              <button type="button" data-room-key="1">1</button>
-              <button type="button" data-room-key="2">2</button>
-              <button type="button" data-room-key="3">3</button>
-              <button type="button" data-room-key="4">4</button>
-              <button type="button" data-room-key="5">5</button>
-              <button type="button" data-room-key="6">6</button>
-              <button type="button" data-room-key="7">7</button>
-              <button type="button" data-room-key="8">8</button>
-              <button type="button" data-room-key="9">9</button>
-              <button type="button" data-room-key="0">0</button>
-              <button class="wide" type="button" data-room-key="backspace">Back</button>
-              <button class="wide" type="button" data-room-key="clear">Clear</button>
-            </div>
-            <button id="join-room" class="race-start-button join-room-field" type="button">Join Room</button>
-            <section id="available-lobbies" class="available-lobbies" aria-label="Available lobbies">
-              <div class="available-lobbies-header">
-                <div>
-                  <p class="lobby-title">Available lobbies</p>
-                  <span id="available-lobbies-count">0 rooms</span>
-                </div>
-                <button id="refresh-lobbies" type="button">Refresh</button>
-              </div>
-              <div id="available-lobby-list" class="available-lobby-list" role="list"></div>
-            </section>
-            <div id="room-lobby" class="room-lobby" aria-label="Room lobby">
-              <div class="room-code-display">
-                <span>Room code</span>
-                <strong id="active-room-code">----</strong>
-              </div>
-              <p id="leader-waiting" class="leader-waiting">Waiting for other players.</p>
-              <div>
-                <p class="lobby-title">Players</p>
-                <ul id="room-player-list" class="room-player-list"></ul>
-              </div>
-              <button id="ready-toggle" class="race-start-button secondary" type="button">Ready</button>
-              <button id="start-multiplayer" class="race-start-button" type="button" disabled>Start Race</button>
-            </div>
-            <button id="multiplayer-back" class="race-start-button secondary" type="button" aria-label="Back">Back</button>
-          </form>
-          <p id="countdown-label" class="countdown-label" aria-live="polite">5</p>
-        </div>
+          <p class="helper">Pass the screen around. Each player owns a piece of the pattern.</p>
+          <div id="players" class="players"></div>
+          <button id="start" class="primary-button">START ROUND</button>
+          <button id="reset" class="text-button">Reset game</button>
+        </aside>
+
+        <section class="play-area" aria-label="Memory sequence board">
+          <div id="status" class="status" aria-live="polite">Choose your crew, then start.</div>
+          <div id="board" class="board"></div>
+          <p class="hint">Watch together. Then rebuild the sequence as one team.</p>
+        </section>
+
+        <aside class="metrics-panel">
+          <div class="time-card"><p>TEAM TIME</p><strong id="timer">00:00.0</strong><span id="timer-state">READY</span></div>
+          <div class="progress-card"><p>PROGRESSION</p><div id="ladder" class="ladder"></div></div>
+          <div class="best-card"><p>BEST TEAM TIME</p><strong id="best">—</strong><span>Fastest complete round</span></div>
+        </aside>
       </section>
-      <section id="help-modal" class="help-modal" aria-label="Vehicle controls" hidden>
-        <div class="help-panel">
-          <div class="help-content">
-            <section class="help-section" aria-label="Driver controls">
-              <h1>Control Guide</h1>
-              <p class="help-eyebrow">Driver controls</p>
-              <div class="help-steps">
-                <article class="help-step">
-                  <div class="help-picture hands-fist" aria-hidden="true"><span></span><span></span></div>
-                  <div>
-                    <h2>Speed up</h2>
-                    <p>Show both hands and clench both fists to accelerate.</p>
-                  </div>
-                </article>
-                <article class="help-step">
-                  <div class="help-picture hands-open" aria-hidden="true"><span></span><span></span></div>
-                  <div>
-                    <h2>Slow down</h2>
-                    <p>Open both hands to ease the car back down.</p>
-                  </div>
-                </article>
-                <article class="help-step">
-                  <div class="help-picture hands-turn" aria-hidden="true"><span></span><span></span></div>
-                  <div>
-                    <h2>Steer</h2>
-                    <p>Keep one hand on each side, then raise or lower both hands to turn left or right.</p>
-                  </div>
-                </article>
-              </div>
-            </section>
-            <section class="credits-section" aria-label="Credits">
-              <h1>Credits</h1>
-              <aside class="help-credit-card" aria-label="Model credit">
-                <div class="credit-model-image" aria-hidden="true">
-                  <span class="credit-car-body"></span>
-                  <span class="credit-car-wing"></span>
-                  <span class="credit-car-wheel front"></span>
-                  <span class="credit-car-wheel rear"></span>
-                </div>
-                <div>
-                  <p>CAR</p>
-                  <strong>salasilma13</strong>
-                </div>
-              </aside>
-            </section>
-          </div>
-          <button id="help-close" class="race-start-button secondary" type="button">Back</button>
-        </div>
-      </section>
-      <button id="pause-open" class="pause-open-button" type="button" aria-label="Pause race">
-        <span></span>
-        <span></span>
-      </button>
-      <section id="pause-modal" class="pause-modal" aria-label="Pause menu" hidden>
-        <div class="pause-panel">
-          <h1>GAME PAUSED</h1>
-          <div class="pause-actions">
-            <button id="pause-resume" class="race-start-button" type="button">Return to Game</button>
-            <button id="pause-exit" class="race-start-button secondary" type="button">Exit to Lobby</button>
-          </div>
-        </div>
-      </section>
-      <section id="ending-screen" class="ending-screen" aria-label="Race results" hidden>
-        <div class="ending-panel">
-          <p class="ending-eyebrow">Race complete</p>
-          <h1 id="ending-title">Results</h1>
-          <ol id="results-list" class="results-list"></ol>
-          <div class="ending-actions">
-            <button id="results-main-menu" class="race-start-button secondary" type="button">Main Menu</button>
-            <button id="results-return" class="race-start-button" type="button">Return</button>
-          </div>
-        </div>
-      </section>
-      <p id="car-hover-label" class="car-hover-label" aria-hidden="true"></p>
-      <section class="hud" aria-label="Map controls">
-        <div class="stats" aria-label="Track stats">
-          <span class="stat-card"><em id="laps-status">laps left</em><strong id="laps-left">3</strong></span>
-          <span class="stat-card"><em>timer</em><strong id="race-timer">0:00.0</strong></span>
-        </div>
-      </section>
-      <p id="speed-stat" class="speed-stat" aria-label="Current speed">
-        <strong id="speed-value">0</strong>
-        <span>km/h</span>
-      </p>
-      <p id="current-place-stat" class="current-place-stat" hidden><strong id="current-place">1st</strong></p>
-      <p id="checkpoint-feedback" class="checkpoint-feedback" aria-live="polite"></p>
-      <div id="hand-cursor" class="hand-cursor" aria-hidden="true"></div>
-      <section class="webcam-panel" aria-label="Webcam preview">
-        <div class="webcam-header">
-          <p class="eyebrow">Driver Cam</p>
-          <span id="webcam-status" role="status">Off</span>
-        </div>
-        <div class="webcam-frame">
-          <video id="webcam-video" autoplay muted playsinline></video>
-          <canvas id="hand-overlay" aria-hidden="true"></canvas>
-          <p id="webcam-message" class="webcam-message">Ready</p>
-          <button id="webcam-enable" class="webcam-enable-button" type="button">Enable camera</button>
-        </div>
-        <p id="hand-status" class="hand-status">Controls: off</p>
-      </section>
+      <footer><span>Play together</span><span>•</span><span>Remember more</span></footer>
     </main>
     <script type="module" src="/src/main.js"></script>
   </body>
