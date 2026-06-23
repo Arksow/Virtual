@@ -1,9 +1,0 @@
-[   52823ms] TypeError: Cannot read properties of null (reading 'addEventListener')
-    at http://127.0.0.1:5173/src/main.js?t=1780376712301:1299:19
-[   63712ms] TypeError: Cannot set properties of null (setting 'disabled')
-    at setWebcamState (http://127.0.0.1:5173/src/main.js?t=1780376835426:927:30)
-    at http://127.0.0.1:5173/src/main.js?t=1780376835426:1304:1
-[   85249ms] TypeError: Cannot set properties of null (setting 'disabled')
-    at setWebcamState (http://127.0.0.1:5173/src/main.js?t=1780376835426:927:30)
-    at stopWebcam (http://127.0.0.1:5173/src/main.js?t=1780376835426:1297:5)
-    at http://127.0.0.1:5173/@vite/client:803:13
