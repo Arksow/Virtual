@@ -1,0 +1,49 @@
+name: Deploy Pulse Memory
+
+on:
+  push:
+    branches: [Brain]
+    paths:
+      - "pulse-memory/**"
+      - ".github/workflows/deploy-pulse-memory.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: pulse-memory/package-lock.json
+      - name: Install dependencies
+        working-directory: pulse-memory
+        run: npm ci
+      - name: Build
+        working-directory: pulse-memory
+        run: npm run build
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: pulse-memory/dist
+
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
