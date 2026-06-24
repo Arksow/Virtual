@@ -1,9 +1,0 @@
-services:
-  - type: web
-    name: racing-arena
-    runtime: node
-    buildCommand: npm ci && npm run build
-    startCommand: npm start
-    envVars:
-      - key: NODE_ENV
-        value: production

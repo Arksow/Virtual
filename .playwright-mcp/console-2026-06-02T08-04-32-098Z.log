@@ -1,8 +1,0 @@
-[     342ms] [WARNING] Webcam access failed: NotAllowedError: Permission denied @ http://127.0.0.1:5173/src/main.js?t=1780387455218:1309
-[ 2032443ms] [WARNING] Webcam access failed: NotAllowedError: Permission denied @ http://127.0.0.1:5173/src/main.js?t=1780387455218:1309
-[ 2044372ms] [WARNING] Webcam access failed: NotAllowedError: Permission denied @ http://127.0.0.1:5173/src/main.js?t=1780389516022:1316
-[ 2052835ms] [WARNING] Webcam access failed: NotAllowedError: Permission denied @ http://127.0.0.1:5173/src/main.js?t=1780389524507:1323
-[ 2064315ms] [WARNING] Webcam access failed: NotAllowedError: Permission denied @ http://127.0.0.1:5173/src/main.js?t=1780389536026:1350
-[ 2074037ms] [WARNING] Webcam access failed: NotAllowedError: Permission denied @ http://127.0.0.1:5173/src/main.js?t=1780389545768:1350
-[ 2083545ms] [WARNING] Webcam access failed: NotAllowedError: Permission denied @ http://127.0.0.1:5173/src/main.js?t=1780389555259:1350
-[ 2093315ms] [WARNING] Webcam access failed: NotAllowedError: Permission denied @ http://127.0.0.1:5173/src/main.js?t=1780389565005:1350
