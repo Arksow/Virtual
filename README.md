@@ -38,6 +38,28 @@ The browser may redirect to HTTPS and show a privacy warning because the local c
 
 Deploy the `RacingGame` branch to a Node hosting service such as Render. Everyone should open the hosted HTTPS URL.
 
+## GitHub Pages Frontend
+
+GitHub Pages can host the game frontend, but it cannot run the multiplayer backend. To make multiplayer work from the GitHub Pages URL, deploy the Node backend first and set this GitHub repository variable or secret:
+
+```text
+VITE_MULTIPLAYER_URL=wss://YOUR-BACKEND-DOMAIN/multiplayer
+```
+
+Then push the `RacingGame` branch. The Pages workflow builds the frontend with:
+
+```bash
+npm run build:pages
+```
+
+Frontend URL:
+
+```text
+https://arksow.github.io/Virtual/
+```
+
+If `VITE_MULTIPLAYER_URL` is not configured, the page can load, but multiplayer rooms will not work on GitHub Pages.
+
 ### Render
 
 This repo includes `render.yaml`.
