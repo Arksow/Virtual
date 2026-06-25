@@ -46,10 +46,17 @@ GitHub Pages can host the game frontend, but it cannot run the multiplayer backe
 VITE_MULTIPLAYER_URL=wss://YOUR-BACKEND-DOMAIN/multiplayer
 ```
 
-Then push the `RacingGame` branch. The Pages workflow builds the frontend with:
+Build the frontend with:
 
 ```bash
 npm run build:pages
+```
+
+Publish the contents of `dist` to the `gh-pages` branch. The repository Pages source should be set to:
+
+```text
+Branch: gh-pages
+Folder: /
 ```
 
 Frontend URL:
@@ -58,7 +65,7 @@ Frontend URL:
 https://arksow.github.io/Virtual/
 ```
 
-If `VITE_MULTIPLAYER_URL` is not configured, the page can load, but multiplayer rooms will not work on GitHub Pages.
+If `VITE_MULTIPLAYER_URL` is not configured before building, the page can load, but multiplayer rooms will not work on GitHub Pages.
 
 ### Render
 
