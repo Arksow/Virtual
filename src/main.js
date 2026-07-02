@@ -1127,6 +1127,11 @@ function getMultiplayerStartPose(index = 0) {
   return getFormulaGridStartPose(index);
 }
 
+function getMultiplayerStartPoseForPlayer(playerId, fallbackIndex = 0) {
+  const playerIndex = raceState.players.findIndex((player) => player.id === playerId);
+  return getMultiplayerStartPose(playerIndex === -1 ? fallbackIndex : playerIndex);
+}
+
 function getSingleplayerStartPose(index = 0) {
   return getFormulaGridStartPose(index);
 }
@@ -1184,6 +1189,7 @@ function smoothVisualPlayerPose(delta) {
 
 function updateLocalMultiplayerCarState(force = false) {
   if (raceState.mode !== "multiplayer" || !raceState.roomCode || !raceState.playerId) return;
+  if (raceState.phase !== "racing") return;
   const now = Date.now();
   if (!force && now - lastMultiplayerPositionSync < 80) return;
   lastMultiplayerPositionSync = now;
@@ -1215,7 +1221,9 @@ function applyLocalMultiplayerIdentity() {
   );
   setCarPaint(playerCar, localIndex);
   const localPlayer = getLocalPlayer();
-  if (localPlayer?.carState && raceState.phase !== "racing") {
+  if (raceState.phase === "countdown") {
+    applyCarStateToPlayerControl(getMultiplayerStartPoseForPlayer(raceState.playerId, localIndex));
+  } else if (localPlayer?.carState && raceState.phase !== "racing") {
     applyCarStateToPlayerControl(localPlayer.carState);
   }
 }
@@ -1423,10 +1431,13 @@ function renderRemotePlayerCars() {
     }
     setCarPaint(car, playerIndex);
 
-    const carState = player.carState ?? getMultiplayerStartPose(playerIndex || remoteIndex + 1);
+    const carState =
+      raceState.phase === "countdown"
+        ? getMultiplayerStartPoseForPlayer(player.id, playerIndex || remoteIndex + 1)
+        : player.carState ?? getMultiplayerStartPose(playerIndex || remoteIndex + 1);
     car.userData.targetPosition.set(carState.x, 0.24, carState.z);
     car.userData.targetHeading = carState.heading + carModelRotationOffset;
-    if (!car.userData.hasPose) {
+    if (!car.userData.hasPose || raceState.phase === "countdown") {
       car.position.copy(car.userData.targetPosition);
       car.rotation.y = car.userData.targetHeading;
       car.userData.hasPose = true;
@@ -1522,7 +1533,9 @@ function placeStartingGrid() {
       raceState.players.findIndex((player) => player.id === raceState.playerId),
     );
     const localPlayer = getLocalPlayer();
-    if (localPlayer?.carState) {
+    if (raceState.phase === "countdown") {
+      applyCarStateToPlayerControl(getMultiplayerStartPoseForPlayer(raceState.playerId, localIndex));
+    } else if (localPlayer?.carState) {
       applyCarStateToPlayerControl(localPlayer.carState);
     } else {
       applyCarStateToPlayerControl(getMultiplayerStartPose(localIndex));
@@ -2119,9 +2132,8 @@ function beginSharedMultiplayerCountdown(startedAt) {
   resetRaceState();
   raceState.mode = "multiplayer";
   raceState.phase = "countdown";
-  const countdownElapsed = Math.max(0, (Date.now() - startedAt) / 1000);
-  raceState.countdownStartTime = getRaceClockTime() - countdownElapsed;
-  raceState.countdownRemaining = Math.max(0, raceState.countdownDuration - countdownElapsed);
+  raceState.countdownStartTime = getRaceClockTime();
+  raceState.countdownRemaining = raceState.countdownDuration;
   setCameraMode("chase");
   setHandStatus("starting");
   if (!webcamStream) {
